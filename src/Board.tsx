@@ -157,7 +157,9 @@ export function BoardView({
                 {label(queue)} <span className="count">{entries.length}</span>
               </h3>
               <small>
-                {queue.interval ? `Back in ${longLabel(queue).toLowerCase()}` : "No more reviews"}
+                {queue.interval && !queue.random
+                  ? `Back in ${longLabel(queue).toLowerCase()}`
+                  : longLabel(queue)}
               </small>
               <button className="icon" title="Edit queue" onClick={() => actions.editQueue(queue)}>
                 ⋯

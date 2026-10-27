@@ -10,7 +10,7 @@ import {
   validate,
 } from "./data";
 import { allTags, buildBoard, nextUp } from "./board";
-import { formatDue } from "./scheduling";
+import { dueAt, formatDue } from "./scheduling";
 import { emptyAppData, type AppData } from "../types";
 
 const t0 = new Date("2026-01-20T00:00:00.000Z");
@@ -21,12 +21,12 @@ const titles = (entries: { title: string }[]) => entries.map((e) => e.title);
 
 function seeded() {
   let data = emptyAppData();
-  const [d1, d3, w1, , done] = ids(data);
+  const [d1, d3, w1, , random, done] = ids(data);
   data = addEntry(data, "default", d3, { title: "Two Sum", tags: ["arrays"] }, t0);
   data = addEntry(data, "default", d1, { title: "Heap", tags: ["heap", "arrays"] }, t0);
   data = addEntry(data, "default", w1, { title: "Graphs" }, t0);
   data = addEntry(data, "default", done, { title: "FizzBuzz" }, t0);
-  return { data, d1, d3, w1, done };
+  return { data, d1, d3, w1, random, done };
 }
 
 describe("entries", () => {
@@ -94,6 +94,34 @@ describe("board", () => {
     expect(formatDue(data.entries[0], queue, later(3, 5))).toBe("5h overdue");
     expect(formatDue(data.entries[0], queue, later(5))).toBe("2d overdue");
   });
+  it("resurfaces random entries at a stable point between 1x and 2x the delay", () => {
+    const { data, random } = seeded();
+    const queue = topic(data).queues.find((q) => q.id === random)!;
+    const graphs = data.entries.find((e) => e.title === "Graphs")!;
+    const parked = moveEntry(data, graphs.id, random, t0).entries.find((e) => e.id === graphs.id)!;
+    const due = dueAt(parked, queue)!.getTime();
+    expect(due).toBeGreaterThanOrEqual(later(14).getTime());
+    expect(due).toBeLessThan(later(28).getTime());
+    expect(dueAt(parked, queue)!.getTime()).toBe(due);
+    expect(dueAt({ ...parked, movedAt: later(0, 1).toISOString() }, queue)!.getTime() - 3_600_000).not.toBe(
+      due,
+    );
+    const spread = new Set(
+      Array.from({ length: 50 }, (_, i) => dueAt({ ...parked, id: `e${i}` }, queue)!.getTime()),
+    );
+    expect(spread.size).toBeGreaterThan(45);
+    expect(buildBoard(topic(data), [parked], later(13)).due).toHaveLength(0);
+    expect(buildBoard(topic(data), [parked], later(28)).due).toHaveLength(1);
+  });
+  it("hides the exact due time of random entries", () => {
+    const { data, random } = seeded();
+    const queue = topic(data).queues.find((q) => q.id === random)!;
+    const entry = { ...data.entries[0], queueId: random };
+    const due = dueAt(entry, queue)!;
+    expect(formatDue(entry, queue, later(4))).toBe("in 10d+");
+    if (due > later(14)) expect(formatDue(entry, queue, later(14))).toBe("any day now");
+    expect(formatDue(entry, queue, due)).toBe("due now");
+  });
   it("collects tags", () => expect(allTags(seeded().data.entries)).toEqual(["arrays", "heap"]));
 });
 
@@ -118,6 +146,19 @@ describe("validation", () => {
   });
   it("rejects the old subject format", () =>
     expect(() => validate({ version: 3, subjects: [], items: [], selectedSubjectId: "x" })).toThrow());
+  it("rejects malformed random queues", () => {
+    const { data } = seeded();
+    const withQueue = (patch: object) => ({
+      ...data,
+      topics: data.topics.map((t) => ({
+        ...t,
+        queues: t.queues.map((q, i) => (i ? q : { ...q, ...patch })),
+      })),
+    });
+    expect(() => validate(withQueue({ random: "yes" }))).toThrow();
+    expect(() => validate(withQueue({ random: true, interval: null }))).toThrow();
+    expect(() => validate(withQueue({ random: true }))).not.toThrow();
+  });
   it("rejects entries in unknown queues", () => {
     const { data } = seeded();
     expect(() => validate({ ...data, entries: [{ ...data.entries[0], queueId: "nope" }] })).toThrow();

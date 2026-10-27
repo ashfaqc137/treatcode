@@ -122,6 +122,7 @@ export function QueueEditor({
   const [name, setName] = useState(queue?.name ?? ""),
     [value, setValue] = useState(queue?.interval?.value ?? 2),
     [unit, setUnit] = useState<TimeUnit | typeof NEVER>(queue ? (queue.interval?.unit ?? NEVER) : "week"),
+    [random, setRandom] = useState(!!queue?.random),
     [deleting, setDeleting] = useState(false);
   const others = byDuration(topic.queues).filter((q) => q.id !== queue?.id);
   const [mode, setMode] = useState<QueueDeletion["mode"]>("move"),
@@ -170,7 +171,7 @@ export function QueueEditor({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          save({ name, interval });
+          save({ name, interval, random: random && !!interval });
         }}
       >
         <label>
@@ -194,12 +195,21 @@ export function QueueEditor({
             </select>
           </div>
         </label>
+        <label className="inline">
+          <input
+            type="checkbox"
+            checked={random && unit !== NEVER}
+            disabled={unit === NEVER}
+            onChange={(e) => setRandom(e.target.checked)}
+          />
+          Resurface at a random time (between 1× and 2× this delay)
+        </label>
         <label>
           Name <small>(optional)</small>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={shortLabel({ id: "", interval, createdOrder: 0 })}
+            placeholder={shortLabel({ id: "", interval, createdOrder: 0, random: random || undefined })}
           />
         </label>
         <div className="modal-actions">
@@ -258,7 +268,9 @@ export function TopicEditor({
           />
         </label>
         {!topic && (
-          <p className="muted">It starts with 1d · 3d · 1w · 1mo · Done queues. You can change them later.</p>
+          <p className="muted">
+            It starts with 1d · 3d · 1w · 1mo · Random · Done queues. You can change them later.
+          </p>
         )}
         <div className="modal-actions">
           {topic && (

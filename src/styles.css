@@ -525,7 +525,8 @@ button:focus-visible,
   margin-bottom: 10px;
   font-weight: 400;
 }
-.modal label.inline input[type="radio"] {
+.modal label.inline input[type="radio"],
+.modal label.inline input[type="checkbox"] {
   width: auto;
 }
 .modal label.inline select {

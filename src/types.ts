@@ -10,6 +10,8 @@ export interface Queue {
   interval: Interval | null;
   name?: string;
   createdOrder: number;
+  // Random queues need an interval: entries come due at a random point between 1x and 2x of it.
+  random?: true;
 }
 export interface MoveRecord {
   at: string;
@@ -46,6 +48,7 @@ export const defaultQueues = (): Queue[] =>
     { interval: { unit: "day", value: 3 } },
     { interval: { unit: "week", value: 1 } },
     { interval: { unit: "month", value: 1 } },
+    { interval: { unit: "week", value: 2 }, random: true },
     { interval: null, name: "Done" },
   ].map((q, createdOrder) => ({ id: crypto.randomUUID(), ...q, createdOrder }) as Queue);
 export const newTopic = (title: string, id: string = crypto.randomUUID()): Topic => ({

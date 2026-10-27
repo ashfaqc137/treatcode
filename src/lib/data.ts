@@ -115,6 +115,7 @@ export function removeEntry(data: AppData, id: string): AppData {
 export interface QueueInput {
   interval: Interval | null;
   name?: string;
+  random?: boolean;
 }
 const validInterval = (i: unknown): i is Interval | null =>
   i === null ||
@@ -122,11 +123,12 @@ const validInterval = (i: unknown): i is Interval | null =>
     TIME_UNITS.includes((i as Interval).unit) &&
     Number.isInteger((i as Interval).value) &&
     (i as Interval).value >= 1);
-function checkedQueue(queues: Queue[], queue: Queue): Queue {
+function checkedQueue(queues: Queue[], { random, ...queue }: Omit<Queue, "random"> & { random?: boolean }) {
   if (!validInterval(queue.interval)) throw new Error("Duration must be a whole number ≥ 1.");
+  if (random && !queue.interval) throw new Error("A random queue needs a delay.");
   const name = queue.name?.trim() || undefined;
   if (name && name.length > 40) throw new Error("Queue names are limited to 40 characters.");
-  const result = { ...queue, name };
+  const result: Queue = { ...queue, name, ...(random ? { random: true as const } : {}) };
   const others = [...queues.filter((q) => q.id !== queue.id), result];
   const label = norm(queueLabel(result, others));
   if (others.some((q) => q.id !== queue.id && norm(queueLabel(q, others)) === label))
@@ -191,6 +193,7 @@ export function validate(value: unknown): AppData {
         ids.has(q.id) ||
         !validInterval(q.interval) ||
         !Number.isFinite(q.createdOrder) ||
+        (q.random !== undefined && (q.random !== true || !q.interval)) ||
         (q.name !== undefined && (typeof q.name !== "string" || q.name.length > 40))
       )
         throw new Error("Invalid queue.");

@@ -4,11 +4,12 @@ import { addDuration, byDuration, longLabel, queueLabel, shortLabel } from "./qu
 import { dueAt } from "./scheduling";
 import { emptyAppData, type AppData, type Queue, type TimeUnit } from "../types";
 
-const q = (unit: TimeUnit | null, value = 1, createdOrder = 0, name?: string): Queue => ({
-  id: `${value}${unit}${createdOrder}`,
+const q = (unit: TimeUnit | null, value = 1, createdOrder = 0, name?: string, random?: true): Queue => ({
+  id: `${random ? "r" : ""}${value}${unit}${createdOrder}`,
   interval: unit ? { unit, value } : null,
   name,
   createdOrder,
+  random,
 });
 const now = new Date("2026-01-20T00:00:00.000Z");
 const queuesOf = (data: AppData) => data.topics[0].queues;
@@ -20,6 +21,12 @@ describe("queue labels", () => {
     expect([shortLabel(q("week", 2)), longLabel(q("week", 2))]).toEqual(["2w", "2 Weeks"]);
     expect([shortLabel(q("month", 1)), longLabel(q("month", 1))]).toEqual(["1mo", "1 Month"]);
     expect(shortLabel(q(null))).toBe("Done");
+    const r = q("week", 2, 0, undefined, true);
+    expect([shortLabel(r), longLabel(r)]).toEqual(["Random", "Randomly after 2 weeks"]);
+  });
+  it("does not count random queues as twins of timed ones", () => {
+    const queues = [q("week", 2, 0), q("week", 2, 1, undefined, true), q("month", 1, 2, undefined, true)];
+    expect(queues.map((x) => queueLabel(x, queues))).toEqual(["2w", "Random", "Random(1)"]);
   });
   it("suffixes duplicate durations in creation order", () => {
     const queues = [q("week", 2, 0), q("week", 2, 1), q("week", 2, 2)];
@@ -29,12 +36,13 @@ describe("queue labels", () => {
     const queues = [q("week", 2, 0, "Warm-up"), q("week", 2, 1)];
     expect(queues.map((x) => queueLabel(x, queues))).toEqual(["Warm-up", "2w"]);
   });
-  it("starts topics with 1d, 3d, 1w, 1mo and Done", () =>
+  it("starts topics with 1d, 3d, 1w, 1mo, Random and Done", () =>
     expect(byDuration(queuesOf(emptyAppData())).map((x) => queueLabel(x, queuesOf(emptyAppData())))).toEqual([
       "1d",
       "3d",
       "1w",
       "1mo",
+      "Random",
       "Done",
     ]));
 });
@@ -50,6 +58,10 @@ describe("durations", () => {
         (x) => x.id,
       ),
     ).toEqual(["3day0", "2week2", "2week3", "1month1", "1null4"]));
+  it("puts random queues after the timed ones, before parking", () =>
+    expect(
+      byDuration([q(null, 1, 0), q("month", 2, 1, undefined, true), q("month", 6, 2)]).map((x) => x.id),
+    ).toEqual(["6month2", "r2month1", "1null0"]));
 });
 
 describe("queue management", () => {
@@ -60,6 +72,21 @@ describe("queue management", () => {
     expect(queues.slice(-2).map((x) => queueLabel(x, queues))).toEqual(["2w", "2w(1)"]);
     expect(() => createQueue(data, "default", { interval: { unit: "day", value: 5 }, name: "2w" })).toThrow();
     expect(() => createQueue(data, "default", { interval: { unit: "day", value: 0 } })).toThrow();
+  });
+  it("creates random queues only with a delay", () => {
+    const data = createQueue(emptyAppData(), "default", {
+      interval: { unit: "month", value: 1 },
+      random: true,
+    });
+    expect(queuesOf(data).at(-1)).toMatchObject({ random: true });
+    expect(() => createQueue(data, "default", { interval: null, name: "Lucky", random: true })).toThrow();
+    const plain = createQueue(emptyAppData(), "default", {
+      interval: { unit: "day", value: 5 },
+      random: false,
+    });
+    expect("random" in queuesOf(plain).at(-1)!).toBe(false);
+    const id = queuesOf(data).at(-1)!.id;
+    expect(queuesOf(updateQueue(data, "default", id, { random: false })).at(-1)!.random).toBeUndefined();
   });
   it("creates a second parking queue with a suffix", () => {
     const data = createQueue(emptyAppData(), "default", { interval: null, name: "Shelved" });
