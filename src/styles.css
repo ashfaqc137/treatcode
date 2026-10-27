@@ -200,6 +200,18 @@ button:focus-visible,
 .topbar > .icon.on {
   color: var(--primary);
 }
+.topbar > .cloud {
+  position: relative;
+}
+.cloud .dot {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+}
 
 /* Quick add */
 .quick-add {
@@ -543,6 +555,15 @@ button:focus-visible,
   justify-self: start;
 }
 .panel .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.panel a {
+  color: var(--primary);
+}
+.token-form {
+  justify-self: stretch;
   display: flex;
   gap: 8px;
 }

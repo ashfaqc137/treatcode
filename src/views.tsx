@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode, type RefObject } from "react";
 import { parseTags, type EntryInput, type QueueDeletion, type QueueInput } from "./lib/data";
 import { byDuration, longLabel, queueLabel, shortLabel } from "./lib/queues";
 import { formatDue } from "./lib/scheduling";
+import type { SyncConfig } from "./storage/gistSync";
 import type { ThemePref } from "./theme";
 import { TIME_UNITS, type Entry, type Interval, type Queue, type TimeUnit, type Topic } from "./types";
 
@@ -283,12 +284,93 @@ const THEMES: { value: ThemePref; label: string }[] = [
   { value: "light", label: "☀ Light" },
   { value: "dark", label: "☾ Dark" },
 ];
+export interface CloudSync {
+  config: SyncConfig | null;
+  busy: boolean;
+  connect: (token: string) => void;
+  save: () => void;
+  load: () => void;
+  disconnect: () => void;
+}
+const formatBytes = (n: number) =>
+  n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`;
+function CloudPanel({ cloud }: { cloud: CloudSync }) {
+  const [token, setToken] = useState("");
+  const { config, busy } = cloud;
+  return (
+    <article className="panel">
+      <h3>Cloud sync (GitHub Gist)</h3>
+      {config ? (
+        <>
+          <p className="muted">
+            {config.remoteUpdatedAt
+              ? `Last synced ${new Date(config.remoteUpdatedAt).toLocaleString()}`
+              : "Not saved to the cloud yet"}
+            {/* Shown so a growing save gets noticed: see NOTE (size limit) in storage/gistSync.ts. */}
+            {config.bytes !== undefined && ` · ${formatBytes(config.bytes)}`}
+            {config.dirty && " · unsaved changes"}
+          </p>
+          <div className="actions">
+            <button className="primary" disabled={busy} onClick={cloud.save}>
+              Save to cloud
+            </button>
+            <button disabled={busy || !config.gistId} onClick={cloud.load}>
+              Load from cloud
+            </button>
+            <button disabled={busy} onClick={cloud.disconnect}>
+              Disconnect
+            </button>
+          </div>
+          {config.gistId && (
+            <a href={`https://gist.github.com/${config.gistId}`} target="_blank" rel="noreferrer">
+              View the gist and its save history ↗
+            </a>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="muted">
+            Save your progress to a private gist and load it in another browser or on another laptop. Create a{" "}
+            <a
+              href="https://github.com/settings/tokens/new?scopes=gist&description=TreatCode"
+              target="_blank"
+              rel="noreferrer"
+            >
+              token with only gist access
+            </a>{" "}
+            and paste it here. It's stored only in this browser.
+          </p>
+          <form
+            className="token-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (token.trim()) cloud.connect(token.trim());
+            }}
+          >
+            <input
+              type="password"
+              placeholder="GitHub token"
+              autoComplete="off"
+              aria-label="GitHub token"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+            />
+            <button className="primary" disabled={busy || !token.trim()}>
+              Connect
+            </button>
+          </form>
+        </>
+      )}
+    </article>
+  );
+}
 export function SettingsView({
   theme,
   setTheme,
   exportData,
   importData,
   fileRef,
+  cloud,
   clear,
   back,
 }: {
@@ -297,6 +379,7 @@ export function SettingsView({
   exportData: () => void;
   importData: (f?: File) => void;
   fileRef: RefObject<HTMLInputElement | null>;
+  cloud: CloudSync;
   clear: () => void;
   back: () => void;
 }) {
@@ -323,10 +406,12 @@ export function SettingsView({
           ))}
         </div>
       </article>
+      <CloudPanel cloud={cloud} />
       <article className="panel">
         <h3>Backup</h3>
         <p className="muted">
-          Everything lives in this browser. Export a JSON file to keep a copy or move devices.
+          Everything lives in this browser. Export a JSON file to keep an offline copy, or move devices
+          without cloud sync.
         </p>
         <div className="actions">
           <button onClick={exportData}>Export JSON</button>

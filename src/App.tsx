@@ -14,15 +14,36 @@ import {
 } from "./lib/data";
 import { queueLabel } from "./lib/queues";
 import { indexedDbStorage } from "./storage/indexedDb";
+import {
+  findGist,
+  loadSync,
+  pullGist,
+  pushGist,
+  remoteUpdatedAt,
+  storeSync,
+  SyncError,
+  type SyncConfig,
+} from "./storage/gistSync";
 import type { AppData, Entry, Queue } from "./types";
 import { BoardView, type BoardActions } from "./Board";
-import { EntryEditor, QueueEditor, SettingsView, TopicEditor } from "./views";
+import { EntryEditor, QueueEditor, SettingsView, TopicEditor, type CloudSync } from "./views";
 import { useTheme } from "./theme";
 
 interface Toast {
   text: string;
   error?: boolean;
   undo?: AppData;
+  // Another device saved newer progress; offers a Load button and stays until acted on.
+  offerLoad?: boolean;
+}
+const when = (iso: string) => new Date(iso).toLocaleString();
+// One read-only check on open. Errors are ignored so being offline doesn't nag on every visit;
+// Save and Load still report them.
+async function newerCloudCopy() {
+  const sync = loadSync();
+  if (!sync?.gistId) return null;
+  const remote = await remoteUpdatedAt(sync.token, sync.gistId).catch(() => null);
+  return remote && remote !== sync.remoteUpdatedAt ? remote : null;
 }
 type Dialog =
   | { kind: "entry"; id: string }
@@ -33,7 +54,9 @@ export default function App() {
     [view, setView] = useState<"board" | "settings">("board"),
     [toast, setToast] = useState<Toast | null>(null),
     [dialog, setDialog] = useState<Dialog | null>(null),
-    [now, setNow] = useState(() => new Date());
+    [now, setNow] = useState(() => new Date()),
+    [sync, setSync] = useState(loadSync),
+    [syncing, setSyncing] = useState(false);
   const [theme, setTheme, shownTheme] = useTheme();
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -43,6 +66,14 @@ export default function App() {
       .catch(() => {
         setData(emptyAppData());
         setToast({ text: "Saved data was from an older version, so you're starting with a fresh board." });
+      })
+      .then(newerCloudCopy)
+      .then((remote) => {
+        if (remote)
+          setToast(
+            (t) =>
+              t ?? { text: `Newer progress from another device (saved ${when(remote)}).`, offerLoad: true },
+          );
       });
   }, []);
   // Re-render every minute so entries slide into "Due now" without a refresh.
@@ -51,7 +82,7 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
   useEffect(() => {
-    if (!toast) return;
+    if (!toast || toast.offerLoad) return;
     const id = setTimeout(() => setToast(null), toast.undo ? 6000 : 4000);
     return () => clearTimeout(id);
   }, [toast]);
@@ -59,8 +90,13 @@ export default function App() {
   if (!data) return <main className="loading">Loading…</main>;
   const topic = data.topics.find((t) => t.id === data.selectedTopicId)!;
 
+  const updateSync = (next: SyncConfig | null) => {
+    setSync(next);
+    storeSync(next);
+  };
   const save = (next: AppData) => {
     setData(next);
+    if (sync && !sync.dirty) updateSync({ ...sync, dirty: true });
     setNow(new Date());
     indexedDbStorage.save(next).catch(() => setToast({ text: "Changes could not be saved.", error: true }));
   };
@@ -118,6 +154,81 @@ export default function App() {
     }
   };
 
+  // Cloud sync is manual: the gist only changes when the user presses Save or Load.
+  const runSync = async (fn: () => Promise<void>) => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await fn();
+    } catch (e) {
+      // The gist is gone (or out of the token's reach): forget it so the next Save creates a new one.
+      if (sync && e instanceof SyncError && e.status === 404)
+        updateSync({ ...sync, gistId: undefined, remoteUpdatedAt: undefined });
+      fail(e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+  const cloud: CloudSync = {
+    config: sync,
+    busy: syncing,
+    connect: (token) =>
+      runSync(async () => {
+        const found = await findGist(token);
+        if (!found) {
+          updateSync({ token, dirty: true });
+          setToast({ text: "Connected. Press Save to create your cloud copy." });
+        } else if (confirm(`Cloud copy found (saved ${when(found.updatedAt)}). Load it now?`)) {
+          const pulled = await pullGist(token, found.id);
+          commit(pulled.data, "Loaded from cloud");
+          updateSync({
+            token,
+            gistId: found.id,
+            remoteUpdatedAt: pulled.updatedAt,
+            bytes: pulled.bytes,
+            dirty: false,
+          });
+        } else {
+          // No remoteUpdatedAt yet, so the first Save warns before overwriting the cloud copy.
+          updateSync({ token, gistId: found.id, dirty: true });
+          setToast({ text: "Connected. Your local data was kept." });
+        }
+      }),
+    save: () =>
+      runSync(async () => {
+        const s = sync!;
+        if (s.gistId) {
+          const remote = await remoteUpdatedAt(s.token, s.gistId);
+          if (
+            remote !== s.remoteUpdatedAt &&
+            !confirm(`The cloud copy was saved from another device (${when(remote)}). Overwrite it?`)
+          )
+            return;
+        }
+        const pushed = await pushGist(s.token, s.gistId, data);
+        updateSync({
+          ...s,
+          gistId: pushed.gistId,
+          remoteUpdatedAt: pushed.updatedAt,
+          bytes: pushed.bytes,
+          dirty: false,
+        });
+        setToast({ text: "Saved to cloud" });
+      }),
+    load: () =>
+      runSync(async () => {
+        const s = sync!;
+        if (!s.gistId) throw new Error("Nothing saved to the cloud yet.");
+        if (s.dirty && !confirm("You have changes not saved to the cloud. Replace them with the cloud copy?"))
+          return;
+        const pulled = await pullGist(s.token, s.gistId);
+        // commit() marks the data dirty, so mark it clean afterwards.
+        commit(pulled.data, "Loaded from cloud");
+        updateSync({ ...s, remoteUpdatedAt: pulled.updatedAt, bytes: pulled.bytes, dirty: false });
+      }),
+    disconnect: () => updateSync(null),
+  };
+
   const entry = dialog?.kind === "entry" ? data.entries.find((e) => e.id === dialog.id) : undefined;
   return (
     <main className="app">
@@ -154,6 +265,17 @@ export default function App() {
         >
           {shownTheme === "dark" ? "☀" : "☾"}
         </button>
+        {sync && (
+          <button
+            className="icon cloud"
+            title={sync.dirty ? "Save to cloud (unsaved changes)" : "Saved to cloud"}
+            aria-label={sync.dirty ? "Save to cloud, unsaved changes" : "Save to cloud"}
+            disabled={syncing}
+            onClick={cloud.save}
+          >
+            ☁{sync.dirty && <span className="dot" />}
+          </button>
+        )}
         <button
           className={`icon ${view === "settings" ? "on" : ""}`}
           title="Settings"
@@ -171,6 +293,7 @@ export default function App() {
           exportData={exportData}
           importData={importData}
           fileRef={fileRef}
+          cloud={cloud}
           back={() => setView("board")}
           clear={async () => {
             if (confirm("Delete all data? This cannot be undone.")) {
@@ -250,6 +373,16 @@ export default function App() {
       {toast && (
         <div className={`toast ${toast.error ? "error" : ""}`} role="status">
           <span>{toast.text}</span>
+          {toast.offerLoad && (
+            <button
+              onClick={() => {
+                setToast(null);
+                cloud.load();
+              }}
+            >
+              Load
+            </button>
+          )}
           {toast.undo && (
             <button
               onClick={() => {
