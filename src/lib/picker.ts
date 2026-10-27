@@ -1,20 +1,19 @@
-import type { Settings, StudyItem, ReviewStatus } from "../types";
-import { dayMs, dueAt, isEligible, overdueMs } from "./scheduling";
+import type { Settings, StudyItem } from "../types";
+import { dueAt, intervalMs, isEligible, overdueMs } from "./scheduling";
+import { byPriority } from "./queues";
 
-const priority: ReviewStatus[] = ["RD", "R3", "R2", "R1"];
 const oldest = (items: StudyItem[]) =>
   [...items].sort((a, b) => (a.lastAttemptedAt ?? "").localeCompare(b.lastAttemptedAt ?? ""))[0];
 
 export function pickNextRevision(items: StudyItem[], now: Date, settings: Settings): StudyItem | null {
   const eligible = items.filter((item) => isEligible(item, now, settings));
-  const starving = eligible.filter((item) => {
-    const interval = settings.intervals[item.status as ReviewStatus] * dayMs;
-    return overdueMs(item, now, settings) >= settings.starvationMultiplier * interval;
-  });
+  const starving = eligible.filter(
+    (item) => overdueMs(item, now, settings) >= settings.starvationMultiplier * intervalMs(item, settings),
+  );
   if (starving.length)
     return [...starving].sort((a, b) => overdueMs(b, now, settings) - overdueMs(a, now, settings))[0];
-  for (const status of priority) {
-    const candidate = oldest(eligible.filter((item) => item.status === status));
+  for (const queue of byPriority(settings.queues)) {
+    const candidate = oldest(eligible.filter((item) => item.status === queue.id));
     if (candidate) return candidate;
   }
   return null;
@@ -29,9 +28,7 @@ export function nextFresh(items: StudyItem[]) {
 export function nextUpcoming(items: StudyItem[], settings: Settings) {
   return (
     items
-      .filter((item) => item.status !== "NEW")
-      .sort(
-        (a, b) => (dueAt(a, settings)?.getTime() ?? Infinity) - (dueAt(b, settings)?.getTime() ?? Infinity),
-      )[0] ?? null
+      .filter((item) => dueAt(item, settings))
+      .sort((a, b) => dueAt(a, settings)!.getTime() - dueAt(b, settings)!.getTime())[0] ?? null
   );
 }

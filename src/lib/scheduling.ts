@@ -1,11 +1,16 @@
-import type { ReviewStatus, Settings, StudyItem } from "../types";
+import type { Settings, StudyItem } from "../types";
+import { addDuration, findQueue } from "./queues";
 
+export const hourMs = 3_600_000;
 export const dayMs = 86_400_000;
 export function dueAt(item: StudyItem, settings: Settings): Date | null {
-  if (item.status === "NEW" || !item.lastAttemptedAt) return null;
-  return new Date(
-    new Date(item.lastAttemptedAt).getTime() + (settings.intervals[item.status as ReviewStatus] + 1) * dayMs,
-  );
+  const queue = findQueue(settings, item.status);
+  if (!queue || !item.lastAttemptedAt) return null;
+  return addDuration(new Date(item.lastAttemptedAt), queue);
+}
+export function intervalMs(item: StudyItem, settings: Settings) {
+  const due = dueAt(item, settings);
+  return due ? due.getTime() - new Date(item.lastAttemptedAt!).getTime() : 0;
 }
 export function isEligible(item: StudyItem, now: Date, settings: Settings) {
   const due = dueAt(item, settings);
@@ -18,7 +23,11 @@ export function overdueMs(item: StudyItem, now: Date, settings: Settings) {
 export function formatDue(item: StudyItem, now: Date, settings: Settings) {
   const due = dueAt(item, settings);
   if (!due) return "Not scheduled";
-  if (isEligible(item, now, settings))
-    return `Due (${Math.floor(overdueMs(item, now, settings) / dayMs)}d overdue)`;
+  if (isEligible(item, now, settings)) {
+    const late = overdueMs(item, now, settings);
+    return late < dayMs
+      ? `Due (${Math.floor(late / hourMs)}h overdue)`
+      : `Due (${Math.floor(late / dayMs)}d overdue)`;
+  }
   return `Due ${due.toLocaleString()}`;
 }

@@ -70,7 +70,40 @@
   width: auto;
   margin: 0;
 }
+.queue-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr 5rem 7rem 6.5rem;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+}
+.settings .queue-row input,
+.settings .queue-row select {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+.queue-row .badge {
+  justify-self: start;
+}
+.queue-row button {
+  width: 100%;
+}
+.badge {
+  white-space: nowrap;
+}
+.modal label input[type="radio"] {
+  display: inline;
+  width: auto;
+}
+.modal label select {
+  display: inline-block;
+  width: auto;
+}
 @media (max-width: 760px) {
+  .queue-row {
+    grid-template-columns: 1fr 1fr;
+  }
   .session-entry div {
     flex-direction: column;
   }

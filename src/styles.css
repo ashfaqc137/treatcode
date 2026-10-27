@@ -145,21 +145,10 @@ nav button {
   border-radius: 999px;
   background: #edf0f5;
 }
-.R1 {
-  background: #ffebe9;
-  color: #b42318;
-}
-.R2 {
-  background: #fff5d8;
-  color: #9a6700;
-}
-.R3 {
-  background: #e3f5ed;
-  color: #13794a;
-}
-.RD {
+.badge.queue {
   background: #e9e5ff;
   color: #5942ca;
+  cursor: help;
 }
 .NEW {
   background: #e9eef5;
@@ -167,7 +156,7 @@ nav button {
 }
 .stats {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
   gap: 10px;
   margin: 22px 0;
 }
