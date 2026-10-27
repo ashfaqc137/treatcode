@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { emptyAppData, removeItem, startSession, updateItem, validateImport } from "./lib/data";
+import {
+  emptyAppData,
+  migrate,
+  removeItem,
+  startSession,
+  updateItem,
+  validate,
+  validateImport,
+} from "./lib/data";
 import { nextFresh, nextUpcoming, pickNextRevision } from "./lib/picker";
 import { dueAt, formatDue } from "./lib/scheduling";
 import { indexedDbStorage } from "./storage/indexedDb";
-import { REVIEW_STATUSES, type AppData, type ItemStatus, type StudyItem, type Subject } from "./types";
-import { Queues, Session, Settings } from "./views";
+import type { AppData, ItemStatus, StudyItem, Subject } from "./types";
+import { byDuration } from "./lib/queues";
+import { QueueBadge, Queues, Session, Settings } from "./views";
 type View = "dashboard" | "session" | "queues" | "settings";
 export default function App() {
   const [data, setData] = useState<AppData | null>(null),
@@ -14,8 +23,11 @@ export default function App() {
   useEffect(() => {
     indexedDbStorage
       .load()
-      .then((x) => setData(x as AppData))
-      .catch(() => setData(emptyAppData()));
+      .then((x) => setData(validate(migrate(x))))
+      .catch(() => {
+        setData(emptyAppData());
+        setNotice("Saved data could not be loaded; starting fresh.");
+      });
   }, []);
   const commit = (x: AppData) => {
     setData(x);
@@ -198,13 +210,21 @@ function Dashboard({
         {[
           ["Total", items.length],
           ["Fresh", count("NEW")],
-          ["Due", items.filter((i) => i.status !== "NEW" && dueAt(i, subject.settings)! <= now).length],
+          [
+            "Due",
+            items.filter((i) => (dueAt(i, subject.settings)?.getTime() ?? Infinity) <= now.getTime()).length,
+          ],
           ["Attempts", items.reduce((n, i) => n + i.attemptCount, 0)],
-          ...REVIEW_STATUSES.map((s) => [s, count(s)]),
         ].map(([l, v]) => (
           <div key={String(l)}>
             <strong>{v}</strong>
             <span>{l}</span>
+          </div>
+        ))}
+        {byDuration(subject.settings.queues).map((q) => (
+          <div key={q.id}>
+            <strong>{count(q.id)}</strong>
+            <QueueBadge status={q.id} settings={subject.settings} />
           </div>
         ))}
       </div>
@@ -234,7 +254,12 @@ function Summary({
     <>
       <strong>{item.title}</strong>
       <p>
-        <span className={`badge ${item.status}`}>{item.status}</span> · {item.attemptCount} attempts
+        {subject ? (
+          <QueueBadge status={item.status} settings={subject.settings} />
+        ) : (
+          <span className="badge NEW">NEW</span>
+        )}{" "}
+        · {item.attemptCount} attempts
       </p>
       {now && subject && <small>{formatDue(item, now, subject.settings)}</small>}
     </>

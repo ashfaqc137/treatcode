@@ -1,11 +1,19 @@
-export const STATUSES = ["NEW", "R1", "R2", "R3", "RD"] as const;
-export const REVIEW_STATUSES = ["R1", "R2", "R3", "RD"] as const;
-export type ItemStatus = (typeof STATUSES)[number];
-export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
+export const NEW = "NEW";
+export const TIME_UNITS = ["hour", "day", "week", "month"] as const;
+export type TimeUnit = (typeof TIME_UNITS)[number];
+// "NEW" or a queue id.
+export type ItemStatus = string;
+export interface Queue {
+  id: string;
+  unit: TimeUnit;
+  value: number;
+  name?: string;
+  createdOrder: number;
+}
 export interface AttemptHistory {
   attemptedAt: string;
   previousStatus: ItemStatus;
-  resultingStatus: ReviewStatus;
+  resultingStatus: ItemStatus;
 }
 export interface StudyItem {
   id: string;
@@ -19,7 +27,7 @@ export interface StudyItem {
   history: AttemptHistory[];
 }
 export interface Settings {
-  intervals: Record<ReviewStatus, number>;
+  queues: Queue[];
   starvationMultiplier: number;
 }
 export interface Subject {
@@ -35,23 +43,22 @@ export interface ActiveSession {
   resolved: boolean;
 }
 export interface AppData {
-  version: 2;
+  version: 3;
   subjects: Subject[];
   selectedSubjectId: string;
   items: StudyItem[];
   activeSession?: ActiveSession;
 }
-export const defaultSettings: Settings = {
-  intervals: { R1: 1, R2: 2, R3: 4, RD: 10 },
-  starvationMultiplier: 2,
-};
+export const defaultQueues = (): Queue[] =>
+  [1, 2, 4, 10].map((value, createdOrder) => ({ id: crypto.randomUUID(), unit: "day", value, createdOrder }));
+export const defaultSettings = (): Settings => ({ queues: defaultQueues(), starvationMultiplier: 2 });
 export const defaultSubject = (): Subject => ({
   id: "default",
   title: "Default",
   createdAt: new Date().toISOString(),
-  settings: structuredClone(defaultSettings),
+  settings: defaultSettings(),
 });
 export const emptyAppData = (): AppData => {
   const subject = defaultSubject();
-  return { version: 2, subjects: [subject], selectedSubjectId: subject.id, items: [] };
+  return { version: 3, subjects: [subject], selectedSubjectId: subject.id, items: [] };
 };
