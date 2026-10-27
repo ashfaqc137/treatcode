@@ -1,64 +1,60 @@
-export const NEW = "NEW";
 export const TIME_UNITS = ["hour", "day", "week", "month"] as const;
 export type TimeUnit = (typeof TIME_UNITS)[number];
-// "NEW" or a queue id.
-export type ItemStatus = string;
-export interface Queue {
-  id: string;
+export interface Interval {
   unit: TimeUnit;
   value: number;
+}
+// A queue without an interval is a parking lot (e.g. "Done"): its entries never come due.
+export interface Queue {
+  id: string;
+  interval: Interval | null;
   name?: string;
   createdOrder: number;
 }
-export interface AttemptHistory {
-  attemptedAt: string;
-  previousStatus: ItemStatus;
-  resultingStatus: ItemStatus;
+export interface MoveRecord {
+  at: string;
+  from?: string;
+  to: string;
 }
-export interface StudyItem {
+export interface Entry {
   id: string;
-  subjectId: string;
+  topicId: string;
   title: string;
-  status: ItemStatus;
+  queueId: string;
+  notes?: string;
+  tags: string[];
   createdAt: string;
-  createdOrder: number;
-  lastAttemptedAt?: string;
-  attemptCount: number;
-  history: AttemptHistory[];
+  // When the entry entered its current queue; the due date counts from here.
+  movedAt: string;
+  history: MoveRecord[];
 }
-export interface Settings {
+export interface Topic {
+  id: string;
+  title: string;
+  createdAt: string;
   queues: Queue[];
-  starvationMultiplier: number;
-}
-export interface Subject {
-  id: string;
-  title: string;
-  createdAt: string;
-  settings: Settings;
-}
-export interface ActiveSession {
-  subjectId: string;
-  itemId?: string;
-  startedAt: string;
-  resolved: boolean;
 }
 export interface AppData {
-  version: 3;
-  subjects: Subject[];
-  selectedSubjectId: string;
-  items: StudyItem[];
-  activeSession?: ActiveSession;
+  version: 4;
+  topics: Topic[];
+  selectedTopicId: string;
+  entries: Entry[];
 }
 export const defaultQueues = (): Queue[] =>
-  [1, 2, 4, 10].map((value, createdOrder) => ({ id: crypto.randomUUID(), unit: "day", value, createdOrder }));
-export const defaultSettings = (): Settings => ({ queues: defaultQueues(), starvationMultiplier: 2 });
-export const defaultSubject = (): Subject => ({
-  id: "default",
-  title: "Default",
+  [
+    { interval: { unit: "day", value: 1 } },
+    { interval: { unit: "day", value: 3 } },
+    { interval: { unit: "week", value: 1 } },
+    { interval: { unit: "month", value: 1 } },
+    { interval: null, name: "Done" },
+  ].map((q, createdOrder) => ({ id: crypto.randomUUID(), ...q, createdOrder }) as Queue);
+export const newTopic = (title: string, id: string = crypto.randomUUID()): Topic => ({
+  id,
+  title,
   createdAt: new Date().toISOString(),
-  settings: defaultSettings(),
+  queues: defaultQueues(),
 });
 export const emptyAppData = (): AppData => {
-  const subject = defaultSubject();
-  return { version: 3, subjects: [subject], selectedSubjectId: subject.id, items: [] };
+  const topic = newTopic("My topic", "default");
+  return { version: 4, topics: [topic], selectedTopicId: topic.id, entries: [] };
 };
