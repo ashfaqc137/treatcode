@@ -1,325 +1,218 @@
 import {
-  defaultSettings,
-  defaultSubject,
   emptyAppData,
-  NEW,
+  newTopic,
   TIME_UNITS,
   type AppData,
-  type ItemStatus,
+  type Entry,
+  type Interval,
   type Queue,
-  type Settings,
-  type StudyItem,
-  type Subject,
-  type TimeUnit,
+  type Topic,
 } from "../types";
 import { findQueue, queueLabel } from "./queues";
-const norm = (title: string) => title.trim().toLocaleLowerCase();
-const subjectItems = (data: AppData, subjectId: string) =>
-  data.items.filter((item) => item.subjectId === subjectId);
-function checkedTitles(data: AppData, subjectId: string, rawTitles: string[]) {
-  const existing = new Set(subjectItems(data, subjectId).map((i) => norm(i.title)));
-  const titles = rawTitles.map((x) => x.trim()).filter(Boolean);
-  const duplicate = titles.find((title) => existing.has(norm(title)) || (existing.add(norm(title)), false));
-  if (duplicate) throw new Error(`“${duplicate}” already exists in this subject.`);
-  return titles;
-}
-export function addTitles(data: AppData, subjectId: string, rawTitles: string[], now = new Date()): AppData {
-  const titles = checkedTitles(data, subjectId, rawTitles);
-  const start = Math.max(-1, ...subjectItems(data, subjectId).map((i) => i.createdOrder)) + 1;
-  return {
-    ...data,
-    items: [
-      ...data.items,
-      ...titles.map((title, i) => ({
-        id: crypto.randomUUID(),
-        subjectId,
-        title,
-        status: "NEW" as const,
-        createdAt: now.toISOString(),
-        createdOrder: start + i,
-        attemptCount: 0,
-        history: [],
-      })),
-    ],
-  };
-}
-export function addDraftToSession(data: AppData, title: string, now = new Date()): AppData {
-  const session = data.activeSession;
-  if (!session) throw new Error("No active session.");
-  const titles = checkedTitles(data, session.subjectId, [title]);
-  const start = Math.max(-1, ...subjectItems(data, session.subjectId).map((i) => i.createdOrder)) + 1;
-  const item: StudyItem = {
-    id: crypto.randomUUID(),
-    subjectId: session.subjectId,
-    title: titles[0],
-    status: "NEW",
-    createdAt: now.toISOString(),
-    createdOrder: start,
-    attemptCount: 0,
-    history: [],
-  };
-  return { ...data, items: [...data.items, item], activeSession: { ...session, itemId: item.id } };
-}
-export function classify(data: AppData, id: string, status: string, now = new Date()): AppData {
-  const item = data.items.find((x) => x.id === id);
-  if (!item || !findQueue(subjectOf(data, item.subjectId).settings, status))
-    throw new Error("Unknown queue.");
-  return {
-    ...data,
-    items: data.items.map((item) =>
-      item.id !== id
-        ? item
-        : {
-            ...item,
-            status,
-            lastAttemptedAt: now.toISOString(),
-            attemptCount: item.attemptCount + 1,
-            history: [
-              ...item.history,
-              { attemptedAt: now.toISOString(), previousStatus: item.status, resultingStatus: status },
-            ],
-          },
-    ),
-    activeSession: data.activeSession ? { ...data.activeSession, resolved: true } : undefined,
-  };
-}
-export function discardSessionItem(data: AppData): AppData {
-  const session = data.activeSession;
-  if (!session?.itemId) throw new Error("No session item to discard.");
-  return {
-    ...data,
-    items: data.items.filter((item) => item.id !== session.itemId),
-    activeSession: { ...session, resolved: true },
-  };
-}
-export function startSession(data: AppData, subjectId: string, itemId?: string): AppData {
-  if (data.activeSession) throw new Error("End the current session first.");
-  return {
-    ...data,
-    selectedSubjectId: subjectId,
-    activeSession: { subjectId, itemId, startedAt: new Date().toISOString(), resolved: false },
-  };
-}
-export function endSession(data: AppData): AppData {
-  if (!data.activeSession?.resolved)
-    throw new Error("Classify or discard the session item before ending it.");
-  return { ...data, activeSession: undefined };
-}
-export function createSubject(data: AppData, title: string): AppData {
-  const clean = title.trim();
-  if (!clean) throw new Error("Subject name is required.");
-  if (data.subjects.some((s) => norm(s.title) === norm(clean)))
-    throw new Error("A subject with this name already exists.");
-  const subject: Subject = {
-    id: crypto.randomUUID(),
-    title: clean,
-    createdAt: new Date().toISOString(),
-    settings: defaultSettings(),
-  };
-  return { ...data, subjects: [...data.subjects, subject], selectedSubjectId: subject.id };
-}
-export function updateItem(data: AppData, id: string, title: string, status: ItemStatus): AppData {
-  const item = data.items.find((x) => x.id === id);
-  if (!item) return data;
-  const clean = title.trim();
-  if (!clean) throw new Error("Title is required.");
-  if (subjectItems(data, item.subjectId).some((x) => x.id !== id && norm(x.title) === norm(clean)))
-    throw new Error("An item with this title already exists in this subject.");
-  if (status !== NEW && !findQueue(subjectOf(data, item.subjectId).settings, status))
-    throw new Error("Unknown queue.");
-  return {
-    ...data,
-    items: data.items.map((x) =>
-      x.id !== id
-        ? x
-        : { ...x, title: clean, status, lastAttemptedAt: status === "NEW" ? undefined : x.lastAttemptedAt },
-    ),
-  };
-}
-export function removeItem(data: AppData, id: string): AppData {
-  return { ...data, items: data.items.filter((i) => i.id !== id) };
-}
-const subjectOf = (data: AppData, subjectId: string) => {
-  const subject = data.subjects.find((s) => s.id === subjectId);
-  if (!subject) throw new Error("Unknown subject.");
-  return subject;
+
+const norm = (text: string) => text.trim().toLocaleLowerCase();
+const topicEntries = (data: AppData, topicId: string) => data.entries.filter((e) => e.topicId === topicId);
+const topicOf = (data: AppData, topicId: string) => {
+  const topic = data.topics.find((t) => t.id === topicId);
+  if (!topic) throw new Error("Unknown topic.");
+  return topic;
 };
-const withSettings = (data: AppData, subjectId: string, settings: Settings): AppData => ({
+const withTopic = (data: AppData, topic: Topic): AppData => ({
   ...data,
-  subjects: data.subjects.map((s) => (s.id === subjectId ? { ...s, settings } : s)),
+  topics: data.topics.map((t) => (t.id === topic.id ? topic : t)),
 });
+
+// Topics
+function checkedTopicTitle(data: AppData, title: string, id?: string) {
+  const clean = title.trim();
+  if (!clean) throw new Error("Topic name is required.");
+  if (clean.length > 60) throw new Error("Topic names are limited to 60 characters.");
+  if (data.topics.some((t) => t.id !== id && norm(t.title) === norm(clean)))
+    throw new Error("A topic with this name already exists.");
+  return clean;
+}
+export function createTopic(data: AppData, title: string): AppData {
+  const topic = newTopic(checkedTopicTitle(data, title));
+  return { ...data, topics: [...data.topics, topic], selectedTopicId: topic.id };
+}
+export function renameTopic(data: AppData, topicId: string, title: string): AppData {
+  return withTopic(data, { ...topicOf(data, topicId), title: checkedTopicTitle(data, title, topicId) });
+}
+export function deleteTopic(data: AppData, topicId: string): AppData {
+  topicOf(data, topicId);
+  if (data.topics.length === 1) throw new Error("At least one topic is required.");
+  const topics = data.topics.filter((t) => t.id !== topicId);
+  return {
+    ...data,
+    topics,
+    entries: data.entries.filter((e) => e.topicId !== topicId),
+    selectedTopicId: data.selectedTopicId === topicId ? topics[0].id : data.selectedTopicId,
+  };
+}
+
+// Entries
+export interface EntryInput {
+  title: string;
+  notes?: string;
+  tags?: string[];
+}
+export const parseTags = (raw: string) => raw.split(/[,\s]+/);
+const cleanTags = (tags: string[] = []) =>
+  [...new Set(tags.map(norm).filter(Boolean))].map((t) => t.slice(0, 40)).slice(0, 12);
+function checkedEntry(data: AppData, topicId: string, input: EntryInput, id?: string) {
+  const title = input.title.trim();
+  if (!title) throw new Error("Title is required.");
+  if (topicEntries(data, topicId).some((e) => e.id !== id && norm(e.title) === norm(title)))
+    throw new Error(`“${title}” is already in this topic.`);
+  return { title, notes: input.notes?.trim() || undefined, tags: cleanTags(input.tags) };
+}
+export function addEntry(
+  data: AppData,
+  topicId: string,
+  queueId: string,
+  input: EntryInput,
+  now = new Date(),
+): AppData {
+  if (!findQueue(topicOf(data, topicId), queueId)) throw new Error("Unknown queue.");
+  const at = now.toISOString();
+  const entry: Entry = {
+    id: crypto.randomUUID(),
+    topicId,
+    queueId,
+    ...checkedEntry(data, topicId, input),
+    createdAt: at,
+    movedAt: at,
+    history: [{ at, to: queueId }],
+  };
+  return { ...data, entries: [...data.entries, entry] };
+}
+// Moving restarts the timer, so dropping an entry back into its own queue means "again, same interval".
+export function moveEntry(data: AppData, id: string, queueId: string, now = new Date()): AppData {
+  const entry = data.entries.find((e) => e.id === id);
+  if (!entry) throw new Error("Unknown entry.");
+  if (!findQueue(topicOf(data, entry.topicId), queueId)) throw new Error("Unknown queue.");
+  const at = now.toISOString();
+  return {
+    ...data,
+    entries: data.entries.map((e) =>
+      e.id !== id
+        ? e
+        : { ...e, queueId, movedAt: at, history: [...e.history, { at, from: e.queueId, to: queueId }] },
+    ),
+  };
+}
+export function updateEntry(data: AppData, id: string, input: EntryInput): AppData {
+  const entry = data.entries.find((e) => e.id === id);
+  if (!entry) throw new Error("Unknown entry.");
+  const clean = checkedEntry(data, entry.topicId, input, id);
+  return { ...data, entries: data.entries.map((e) => (e.id === id ? { ...e, ...clean } : e)) };
+}
+export function removeEntry(data: AppData, id: string): AppData {
+  return { ...data, entries: data.entries.filter((e) => e.id !== id) };
+}
+
+// Queues
 export interface QueueInput {
-  unit: TimeUnit;
-  value: number;
+  interval: Interval | null;
   name?: string;
 }
+const validInterval = (i: unknown): i is Interval | null =>
+  i === null ||
+  (typeof i === "object" &&
+    TIME_UNITS.includes((i as Interval).unit) &&
+    Number.isInteger((i as Interval).value) &&
+    (i as Interval).value >= 1);
 function checkedQueue(queues: Queue[], queue: Queue): Queue {
-  if (!TIME_UNITS.includes(queue.unit)) throw new Error("Unknown time unit.");
-  if (!Number.isInteger(queue.value) || queue.value < 1)
-    throw new Error("Duration must be a whole number ≥ 1.");
+  if (!validInterval(queue.interval)) throw new Error("Duration must be a whole number ≥ 1.");
   const name = queue.name?.trim() || undefined;
-  if (name && name.length > 100) throw new Error("Queue names are limited to 100 characters.");
+  if (name && name.length > 40) throw new Error("Queue names are limited to 40 characters.");
   const result = { ...queue, name };
   const others = [...queues.filter((q) => q.id !== queue.id), result];
   const label = norm(queueLabel(result, others));
-  if (label === norm(NEW) || others.some((q) => q.id !== queue.id && norm(queueLabel(q, others)) === label))
+  if (others.some((q) => q.id !== queue.id && norm(queueLabel(q, others)) === label))
     throw new Error(`A queue named “${queueLabel(result, others)}” already exists.`);
   return result;
 }
-export function createQueue(data: AppData, subjectId: string, input: QueueInput): AppData {
-  const { settings } = subjectOf(data, subjectId);
-  const queue = checkedQueue(settings.queues, {
+export function createQueue(data: AppData, topicId: string, input: QueueInput): AppData {
+  const topic = topicOf(data, topicId);
+  const queue = checkedQueue(topic.queues, {
     id: crypto.randomUUID(),
     ...input,
-    createdOrder: Math.max(-1, ...settings.queues.map((q) => q.createdOrder)) + 1,
+    createdOrder: Math.max(-1, ...topic.queues.map((q) => q.createdOrder)) + 1,
   });
-  return withSettings(data, subjectId, { ...settings, queues: [...settings.queues, queue] });
+  return withTopic(data, { ...topic, queues: [...topic.queues, queue] });
 }
-export function updateQueue(data: AppData, subjectId: string, queueId: string, patch: Partial<QueueInput>) {
-  const { settings } = subjectOf(data, subjectId);
-  const current = settings.queues.find((q) => q.id === queueId);
+export function updateQueue(data: AppData, topicId: string, queueId: string, patch: Partial<QueueInput>) {
+  const topic = topicOf(data, topicId);
+  const current = findQueue(topic, queueId);
   if (!current) throw new Error("Unknown queue.");
-  const queue = checkedQueue(settings.queues, { ...current, ...patch });
-  return withSettings(data, subjectId, {
-    ...settings,
-    queues: settings.queues.map((q) => (q.id === queueId ? queue : q)),
-  });
+  const queue = checkedQueue(topic.queues, { ...current, ...patch });
+  return withTopic(data, { ...topic, queues: topic.queues.map((q) => (q.id === queueId ? queue : q)) });
 }
 export type QueueDeletion = { mode: "drop" } | { mode: "move"; target: string };
-export function deleteQueue(data: AppData, subjectId: string, queueId: string, how: QueueDeletion): AppData {
-  const { settings } = subjectOf(data, subjectId);
-  if (!findQueue(settings, queueId)) throw new Error("Unknown queue.");
-  if (settings.queues.length === 1) throw new Error("At least one queue is required.");
-  const session = data.activeSession;
-  if (session && !session.resolved && data.items.some((i) => i.id === session.itemId && i.status === queueId))
-    throw new Error("The active session's item is in this queue.");
-  if (
-    how.mode === "move" &&
-    (how.target === queueId || (how.target !== NEW && !findQueue(settings, how.target)))
-  )
-    throw new Error("Choose another queue to move items into.");
-  const inQueue = (i: StudyItem) => i.subjectId === subjectId && i.status === queueId;
-  const items =
+// Moved entries keep their movedAt, so their due date follows the target queue's interval.
+export function deleteQueue(data: AppData, topicId: string, queueId: string, how: QueueDeletion): AppData {
+  const topic = topicOf(data, topicId);
+  if (!findQueue(topic, queueId)) throw new Error("Unknown queue.");
+  if (topic.queues.length === 1) throw new Error("At least one queue is required.");
+  if (how.mode === "move" && (how.target === queueId || !findQueue(topic, how.target)))
+    throw new Error("Choose another queue to move entries into.");
+  const inQueue = (e: Entry) => e.topicId === topicId && e.queueId === queueId;
+  const entries =
     how.mode === "drop"
-      ? data.items.filter((i) => !inQueue(i))
-      : data.items.map((i) =>
-          inQueue(i)
-            ? {
-                ...i,
-                status: how.target,
-                lastAttemptedAt: how.target === NEW ? undefined : i.lastAttemptedAt,
-              }
-            : i,
-        );
+      ? data.entries.filter((e) => !inQueue(e))
+      : data.entries.map((e) => (inQueue(e) ? { ...e, queueId: how.target } : e));
   return {
-    ...withSettings(data, subjectId, {
-      ...settings,
-      queues: settings.queues.filter((q) => q.id !== queueId),
-    }),
-    items,
+    ...withTopic(data, { ...topic, queues: topic.queues.filter((q) => q.id !== queueId) }),
+    entries,
   };
 }
-const LEGACY = ["R1", "R2", "R3", "RD"];
-function migrateV2(raw: any): AppData {
-  const map = new Map<string, string>();
-  const subjects = raw.subjects.map((subject: any) => {
-    const queues: Queue[] = LEGACY.map((status, createdOrder) => {
-      const days = Number(subject.settings?.intervals?.[status]);
-      const whole = Number.isInteger(days);
-      const queue: Queue = {
-        id: crypto.randomUUID(),
-        unit: whole ? "day" : "hour",
-        value: whole ? days : Math.max(1, Math.round(days * 24)),
-        createdOrder,
-      };
-      map.set(`${subject.id}:${status}`, queue.id);
-      return queue;
-    });
-    return {
-      ...subject,
-      settings: { queues, starvationMultiplier: subject.settings?.starvationMultiplier ?? 2 },
-    };
-  });
-  const remap = (subjectId: string, status: string) => map.get(`${subjectId}:${status}`) ?? status;
-  return {
-    ...raw,
-    version: 3,
-    subjects,
-    items: raw.items.map((item: any) => ({
-      ...item,
-      status: remap(item.subjectId, item.status),
-      history: (item.history ?? []).map((h: any) => ({
-        ...h,
-        previousStatus: remap(item.subjectId, h.previousStatus),
-        resultingStatus: remap(item.subjectId, h.resultingStatus),
-      })),
-    })),
-  };
-}
-export function migrate(value: unknown): AppData {
-  if (!value || typeof value !== "object") throw new Error("Not a TreatCode export.");
-  let raw = value as any;
-  if (raw.version === 1 && Array.isArray(raw.items) && raw.settings) {
-    const subject = defaultSubject();
-    raw = {
-      version: 2,
-      subjects: [{ ...subject, settings: raw.settings }],
-      selectedSubjectId: subject.id,
-      items: raw.items.map((item: any) => ({ ...item, subjectId: subject.id })),
-    };
-  }
-  if (raw.version === 2 && Array.isArray(raw.subjects) && Array.isArray(raw.items)) raw = migrateV2(raw);
-  return raw as AppData;
-}
-export function validate(data: AppData): AppData {
+
+// Persistence
+export function validate(value: unknown): AppData {
+  const data = value as AppData;
   if (
-    data.version !== 3 ||
-    !Array.isArray(data.subjects) ||
-    !Array.isArray(data.items) ||
-    !data.subjects.some((s) => s.id === data.selectedSubjectId)
+    !data ||
+    data.version !== 4 ||
+    !Array.isArray(data.topics) ||
+    !Array.isArray(data.entries) ||
+    !data.topics.some((t) => t.id === data.selectedTopicId)
   )
-    throw new Error("Unsupported export format.");
+    throw new Error("Unsupported data format.");
   const queueIds = new Map<string, Set<string>>();
-  for (const subject of data.subjects) {
-    const queues = subject.settings?.queues;
-    if (!Array.isArray(queues) || !queues.length || !Number.isFinite(subject.settings.starvationMultiplier))
-      throw new Error("Invalid subject settings.");
+  for (const topic of data.topics) {
+    if (typeof topic.title !== "string" || !Array.isArray(topic.queues) || !topic.queues.length)
+      throw new Error("Invalid topic.");
     const ids = new Set<string>();
-    for (const q of queues) {
+    for (const q of topic.queues) {
       if (
         typeof q.id !== "string" ||
         !q.id ||
         ids.has(q.id) ||
-        !TIME_UNITS.includes(q.unit) ||
-        !Number.isInteger(q.value) ||
-        q.value < 1 ||
+        !validInterval(q.interval) ||
         !Number.isFinite(q.createdOrder) ||
-        (q.name !== undefined && (typeof q.name !== "string" || q.name.length > 100))
+        (q.name !== undefined && (typeof q.name !== "string" || q.name.length > 40))
       )
-        throw new Error("Invalid subject settings.");
+        throw new Error("Invalid queue.");
       ids.add(q.id);
     }
-    queueIds.set(subject.id, ids);
+    queueIds.set(topic.id, ids);
   }
   const seen = new Set<string>();
-  for (const item of data.items) {
-    const key = `${item.subjectId}:${norm(item.title)}`;
-    const ids = queueIds.get(item.subjectId);
+  for (const e of data.entries) {
+    const key = `${e.topicId}:${norm(e.title ?? "")}`;
     if (
-      !ids ||
-      !item.id ||
-      !item.title?.trim() ||
-      (item.status !== NEW && !ids.has(item.status)) ||
-      !Number.isFinite(item.createdOrder) ||
-      !Array.isArray(item.history) ||
+      !queueIds.get(e.topicId)?.has(e.queueId) ||
+      !e.id ||
+      !e.title?.trim() ||
+      !Array.isArray(e.tags) ||
+      Number.isNaN(Date.parse(e.movedAt)) ||
+      !Array.isArray(e.history) ||
       seen.has(key)
     )
-      throw new Error("The import contains invalid or duplicate items.");
+      throw new Error("The data contains invalid or duplicate entries.");
     seen.add(key);
   }
   return data;
-}
-export function validateImport(value: unknown): AppData {
-  return { ...validate(migrate(value)), activeSession: undefined };
 }
 export { emptyAppData };

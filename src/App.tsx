@@ -1,46 +1,103 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  createQueue,
+  createTopic,
+  deleteQueue,
+  deleteTopic,
   emptyAppData,
-  migrate,
-  removeItem,
-  startSession,
-  updateItem,
+  moveEntry,
+  removeEntry,
+  renameTopic,
+  updateEntry,
+  updateQueue,
   validate,
-  validateImport,
 } from "./lib/data";
-import { nextFresh, nextUpcoming, pickNextRevision } from "./lib/picker";
-import { dueAt, formatDue } from "./lib/scheduling";
+import { queueLabel } from "./lib/queues";
 import { indexedDbStorage } from "./storage/indexedDb";
-import type { AppData, ItemStatus, StudyItem, Subject } from "./types";
-import { byDuration } from "./lib/queues";
-import { QueueBadge, Queues, Session, Settings } from "./views";
-type View = "dashboard" | "session" | "queues" | "settings";
+import type { AppData, Entry, Queue } from "./types";
+import { BoardView, type BoardActions } from "./Board";
+import { EntryEditor, QueueEditor, SettingsView, TopicEditor } from "./views";
+import { useTheme } from "./theme";
+
+interface Toast {
+  text: string;
+  error?: boolean;
+  undo?: AppData;
+}
+type Dialog =
+  | { kind: "entry"; id: string }
+  | { kind: "queue"; queue: Queue | null }
+  | { kind: "topic"; editing: boolean };
 export default function App() {
   const [data, setData] = useState<AppData | null>(null),
-    [view, setView] = useState<View>("dashboard"),
-    [notice, setNotice] = useState("");
+    [view, setView] = useState<"board" | "settings">("board"),
+    [toast, setToast] = useState<Toast | null>(null),
+    [dialog, setDialog] = useState<Dialog | null>(null),
+    [now, setNow] = useState(() => new Date());
+  const [theme, setTheme, shownTheme] = useTheme();
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     indexedDbStorage
       .load()
-      .then((x) => setData(validate(migrate(x))))
+      .then((x) => setData(validate(x)))
       .catch(() => {
         setData(emptyAppData());
-        setNotice("Saved data could not be loaded; starting fresh.");
+        setToast({ text: "Saved data was from an older version, so you're starting with a fresh board." });
       });
   }, []);
-  const commit = (x: AppData) => {
-    setData(x);
-    indexedDbStorage.save(x).catch(() => setNotice("Changes could not be saved."));
-  };
+  // Re-render every minute so entries slide into "Due now" without a refresh.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), toast.undo ? 6000 : 4000);
+    return () => clearTimeout(id);
+  }, [toast]);
+  const close = useCallback(() => setDialog(null), []);
   if (!data) return <main className="loading">Loading…</main>;
-  const subject = data.subjects.find((s) => s.id === data.selectedSubjectId)!;
-  const items = data.items.filter((i) => i.subjectId === subject.id);
-  const now = new Date();
-  const revision = pickNextRevision(items, now, subject.settings),
-    fresh = nextFresh(items),
-    upcoming = nextUpcoming(items, subject.settings),
-    locked = !!data.activeSession;
+  const topic = data.topics.find((t) => t.id === data.selectedTopicId)!;
+
+  const save = (next: AppData) => {
+    setData(next);
+    setNow(new Date());
+    indexedDbStorage.save(next).catch(() => setToast({ text: "Changes could not be saved.", error: true }));
+  };
+  const commit = (next: AppData, text?: string) => {
+    save(next);
+    if (text) setToast({ text, undo: data });
+  };
+  const fail = (e: unknown) => setToast({ text: (e as Error).message, error: true });
+  const attempt = (fn: () => void) => {
+    try {
+      fn();
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const label = (queueId: string) =>
+    queueLabel(
+      topic.queues.find((q) => q.id === queueId)!,
+      topic.queues,
+    );
+  const actions: BoardActions = {
+    commit,
+    fail,
+    move: (entry, queueId) =>
+      attempt(() =>
+        commit(
+          moveEntry(data, entry.id, queueId),
+          entry.queueId === queueId
+            ? `“${entry.title}” goes around ${label(queueId)} again`
+            : `Moved “${entry.title}” to ${label(queueId)}`,
+        ),
+      ),
+    remove: (entry) => commit(removeEntry(data, entry.id), `Removed “${entry.title}”`),
+    open: (entry: Entry) => setDialog({ kind: "entry", id: entry.id }),
+    editQueue: (queue) => setDialog({ kind: "queue", queue: queue === "new" ? null : queue }),
+  };
+
   const exportData = () => {
     const u = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
     const a = document.createElement("a");
@@ -52,218 +109,162 @@ export default function App() {
   const importData = async (f?: File) => {
     if (!f) return;
     try {
-      const x = validateImport(JSON.parse(await f.text()));
-      if (confirm("Replace all current data?")) {
-        commit(x);
-        setNotice("Import complete.");
-      }
+      const x = validate(JSON.parse(await f.text()));
+      if (confirm("Replace all current data?")) commit(x, "Import complete");
     } catch (e) {
-      setNotice((e as Error).message);
+      fail(e);
     } finally {
       if (fileRef.current) fileRef.current.value = "";
     }
   };
+
+  const entry = dialog?.kind === "entry" ? data.entries.find((e) => e.id === dialog.id) : undefined;
   return (
     <main className="app">
-      <header>
-        <div>
+      <header className="topbar">
+        <div className="brand">
+          <span className="logo">↻</span>
           <h1>TreatCode</h1>
-          <span>Adaptive revision, kept local.</span>
         </div>
-        <nav>
-          <span className="current-subject">
-            <small>Subject</small>
-            <b>{subject.title}</b>
-          </span>
-          {(["dashboard", "session", "queues", "settings"] as View[]).map((n) => (
+        <nav className="topics" aria-label="Topics">
+          {data.topics.map((t) => (
             <button
-              key={n}
-              disabled={locked && n !== "session"}
-              className={view === n ? "active" : ""}
-              onClick={() => setView(n)}
+              key={t.id}
+              className={t.id === topic.id ? "on" : ""}
+              title={t.id === topic.id ? "Rename or delete" : undefined}
+              onClick={() => {
+                setView("board");
+                if (t.id === topic.id) setDialog({ kind: "topic", editing: true });
+                else save({ ...data, selectedTopicId: t.id });
+              }}
             >
-              {n}
+              {t.title}
+              {t.id === topic.id && <span className="pencil">✎</span>}
             </button>
           ))}
+          <button className="add-topic" onClick={() => setDialog({ kind: "topic", editing: false })}>
+            + Topic
+          </button>
         </nav>
+        <button
+          className="icon theme-toggle"
+          title={`Switch to ${shownTheme === "dark" ? "light" : "dark"} theme`}
+          aria-label={`Switch to ${shownTheme === "dark" ? "light" : "dark"} theme`}
+          onClick={() => setTheme(shownTheme === "dark" ? "light" : "dark")}
+        >
+          {shownTheme === "dark" ? "☀" : "☾"}
+        </button>
+        <button
+          className={`icon ${view === "settings" ? "on" : ""}`}
+          title="Settings"
+          onClick={() => setView(view === "settings" ? "board" : "settings")}
+        >
+          ⚙
+        </button>
       </header>
-      {locked && (
-        <div className="notice">
-          A {subject.title} session is active. Finish or discard its item, then end the session.
-        </div>
-      )}
-      {notice && (
-        <div className="notice">
-          {notice}
-          <button onClick={() => setNotice("")}>×</button>
-        </div>
-      )}
-      {view === "dashboard" && (
-        <Dashboard
-          subject={subject}
-          items={items}
-          revision={revision}
-          fresh={fresh}
-          upcoming={upcoming}
-          now={now}
-          locked={locked}
-          start={() => {
-            commit(startSession(data, subject.id, revision?.id ?? fresh?.id));
-            setView("session");
-          }}
-        />
-      )}{" "}
-      {view === "session" && (
-        <Session data={data} subject={subject} onCommit={commit} onEnded={() => setView("dashboard")} />
-      )}{" "}
-      {view === "queues" && (
-        <Queues
-          items={items}
-          settings={subject.settings}
-          now={now}
-          onUpdate={(id, t, s) => {
-            try {
-              commit(updateItem(data, id, t, s));
-            } catch (e) {
-              setNotice((e as Error).message);
-            }
-          }}
-          onDelete={(id) => {
-            if (confirm("Delete this item permanently?")) commit(removeItem(data, id));
-          }}
-        />
-      )}{" "}
-      {view === "settings" && (
-        <Settings
-          data={data}
-          subject={subject}
-          save={commit}
+      {view === "board" ? (
+        <BoardView data={data} topic={topic} now={now} actions={actions} />
+      ) : (
+        <SettingsView
+          theme={theme}
+          setTheme={setTheme}
           exportData={exportData}
           importData={importData}
           fileRef={fileRef}
+          back={() => setView("board")}
           clear={async () => {
-            if (confirm("Delete all data?")) {
+            if (confirm("Delete all data? This cannot be undone.")) {
               await indexedDbStorage.clear();
               setData(emptyAppData());
+              setView("board");
             }
           }}
         />
       )}
-    </main>
-  );
-}
-function Dashboard({
-  subject,
-  items,
-  revision,
-  fresh,
-  upcoming,
-  now,
-  locked,
-  start,
-}: {
-  subject: Subject;
-  items: StudyItem[];
-  revision: StudyItem | null;
-  fresh: StudyItem | null;
-  upcoming: StudyItem | null;
-  now: Date;
-  locked: boolean;
-  start: () => void;
-}) {
-  const count = (s: ItemStatus) => items.filter((i) => i.status === s).length;
-  return (
-    <section>
-      <div className="hero">
-        <div>
-          <p className="eyebrow">{subject.title.toUpperCase()}</p>
-          <h2>
-            {revision || fresh
-              ? "Ready for one focused attempt."
-              : "Start a session to add and attempt an item."}
-          </h2>
-          <p>Each session handles one revision or fresh item, then must be ended.</p>
+      {entry && (
+        <EntryEditor
+          key={entry.id}
+          entry={entry}
+          topic={topic}
+          now={now}
+          close={close}
+          save={(input) =>
+            attempt(() => {
+              commit(updateEntry(data, entry.id, input));
+              close();
+            })
+          }
+          move={(queueId) => {
+            actions.move(entry, queueId);
+            close();
+          }}
+          remove={() => {
+            actions.remove(entry);
+            close();
+          }}
+        />
+      )}
+      {dialog?.kind === "queue" && (
+        <QueueEditor
+          queue={dialog.queue}
+          topic={topic}
+          count={data.entries.filter((e) => e.queueId === dialog.queue?.id).length}
+          close={close}
+          save={(input) =>
+            attempt(() => {
+              commit(
+                dialog.queue
+                  ? updateQueue(data, topic.id, dialog.queue.id, input)
+                  : createQueue(data, topic.id, input),
+              );
+              close();
+            })
+          }
+          remove={(how) =>
+            attempt(() => {
+              commit(deleteQueue(data, topic.id, dialog.queue!.id, how), "Queue deleted");
+              close();
+            })
+          }
+        />
+      )}
+      {dialog?.kind === "topic" && (
+        <TopicEditor
+          topic={dialog.editing ? topic : null}
+          canDelete={data.topics.length > 1}
+          close={close}
+          save={(title) =>
+            attempt(() => {
+              commit(dialog.editing ? renameTopic(data, topic.id, title) : createTopic(data, title));
+              close();
+            })
+          }
+          remove={() =>
+            attempt(() => {
+              commit(deleteTopic(data, topic.id), `Deleted topic “${topic.title}”`);
+              close();
+            })
+          }
+        />
+      )}
+      {toast && (
+        <div className={`toast ${toast.error ? "error" : ""}`} role="status">
+          <span>{toast.text}</span>
+          {toast.undo && (
+            <button
+              onClick={() => {
+                save(toast.undo!);
+                setToast(null);
+              }}
+            >
+              Undo
+            </button>
+          )}
+          <button className="icon" aria-label="Dismiss" onClick={() => setToast(null)}>
+            ×
+          </button>
         </div>
-        <button className="primary" disabled={locked} onClick={start}>
-          Start Study Session
-        </button>
-      </div>
-      <div className="cards">
-        <Card title="Next revision">
-          <Summary
-            item={revision}
-            fallback={
-              upcoming
-                ? `Nothing due. Next: ${upcoming.title} — ${dueAt(upcoming, subject.settings)?.toLocaleString()}`
-                : "No revision currently due"
-            }
-            now={now}
-            subject={subject}
-          />
-        </Card>
-        <Card title="Next fresh item">
-          <Summary item={fresh} fallback="No fresh items remaining" />
-          <p>{count("NEW")} remaining</p>
-        </Card>
-      </div>
-      <div className="stats">
-        {[
-          ["Total", items.length],
-          ["Fresh", count("NEW")],
-          [
-            "Due",
-            items.filter((i) => (dueAt(i, subject.settings)?.getTime() ?? Infinity) <= now.getTime()).length,
-          ],
-          ["Attempts", items.reduce((n, i) => n + i.attemptCount, 0)],
-        ].map(([l, v]) => (
-          <div key={String(l)}>
-            <strong>{v}</strong>
-            <span>{l}</span>
-          </div>
-        ))}
-        {byDuration(subject.settings.queues).map((q) => (
-          <div key={q.id}>
-            <strong>{count(q.id)}</strong>
-            <QueueBadge status={q.id} settings={subject.settings} />
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <article className="card">
-      <h3>{title}</h3>
-      {children}
-    </article>
-  );
-}
-function Summary({
-  item,
-  fallback,
-  now,
-  subject,
-}: {
-  item: StudyItem | null;
-  fallback: string;
-  now?: Date;
-  subject?: Subject;
-}) {
-  return item ? (
-    <>
-      <strong>{item.title}</strong>
-      <p>
-        {subject ? (
-          <QueueBadge status={item.status} settings={subject.settings} />
-        ) : (
-          <span className="badge NEW">NEW</span>
-        )}{" "}
-        · {item.attemptCount} attempts
-      </p>
-      {now && subject && <small>{formatDue(item, now, subject.settings)}</small>}
-    </>
-  ) : (
-    <p>{fallback}</p>
+      )}
+    </main>
   );
 }
