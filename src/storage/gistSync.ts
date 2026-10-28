@@ -19,19 +19,21 @@ import type { AppData } from "../types";
 export interface SyncConfig {
   token: string;
   gistId?: string;
-  // The gist's updated_at as of this device's last Save or Load; a different value on the
-  // server means another device saved since.
+  // The gist's updated_at as of this device's last Save or Load, shown as "Last synced".
   remoteUpdatedAt?: string;
+  // Commit SHA of the gist revision this device last saved or loaded; a different one on the
+  // server means someone saved since. Exact, unlike updated_at, which can drift between responses.
+  remoteVersion?: string;
   bytes?: number;
   // Local changes not yet saved to the cloud.
   dirty: boolean;
 }
 // Per-device (it holds the token), so it lives in localStorage rather than the exported AppData.
-const KEY = "treatcode-sync";
+export const SYNC_KEY = "treatcode-sync";
 
 export function loadSync(): SyncConfig | null {
   try {
-    const value = JSON.parse(localStorage.getItem(KEY) ?? "null");
+    const value = JSON.parse(localStorage.getItem(SYNC_KEY) ?? "null");
     return value && typeof value.token === "string" ? value : null;
   } catch {
     return null;
@@ -39,8 +41,8 @@ export function loadSync(): SyncConfig | null {
 }
 export function storeSync(config: SyncConfig | null) {
   try {
-    if (config) localStorage.setItem(KEY, JSON.stringify(config));
-    else localStorage.removeItem(KEY);
+    if (config) localStorage.setItem(SYNC_KEY, JSON.stringify(config));
+    else localStorage.removeItem(SYNC_KEY);
   } catch {
     // Storage blocked: the connection lasts for this visit only.
   }
@@ -57,6 +59,8 @@ interface Gist {
   id: string;
   updated_at: string;
   files: Record<string, GistFile>;
+  // Newest revision first.
+  history?: { version: string }[];
 }
 export class SyncError extends Error {
   constructor(
@@ -72,6 +76,8 @@ async function request<T>(token: string, path: string, init: RequestInit = {}): 
   try {
     res = await fetch(API + path, {
       ...init,
+      // GitHub allows caching GETs for 60 s; a stale gist would look like someone else's save.
+      cache: "no-store",
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
@@ -101,8 +107,25 @@ export async function findGist(token: string): Promise<{ id: string; updatedAt: 
   }
 }
 
-export async function remoteUpdatedAt(token: string, gistId: string) {
-  return (await request<Gist>(token, `/gists/${gistId}`)).updated_at;
+export interface RemoteState {
+  updatedAt: string;
+  version?: string;
+}
+const stateOf = (gist: Gist): RemoteState => ({
+  updatedAt: gist.updated_at,
+  version: gist.history?.[0]?.version,
+});
+
+export async function remoteState(token: string, gistId: string) {
+  return stateOf(await request<Gist>(token, `/gists/${gistId}`));
+}
+
+// Whether the gist moved past the revision this device last saved or loaded. Configs stored before
+// remoteVersion existed fall back to updated_at.
+export function changedSince(config: SyncConfig, remote: RemoteState) {
+  return config.remoteVersion && remote.version
+    ? config.remoteVersion !== remote.version
+    : config.remoteUpdatedAt !== remote.updatedAt;
 }
 
 // See NOTE (size limit): raw_url covers files over 1 MB, but only up to 10 MB.
@@ -123,7 +146,7 @@ export async function pullGist(token: string, gistId: string) {
   } catch {
     throw new SyncError("The cloud copy isn't valid TreatCode data.");
   }
-  return { data, updatedAt: gist.updated_at, bytes: byteLength(text) };
+  return { data, ...stateOf(gist), bytes: byteLength(text) };
 }
 
 // See NOTE (size limit): this is where the snapshot would be split into parts.
@@ -136,7 +159,7 @@ export async function pushGist(token: string, gistId: string | undefined, data: 
         method: "POST",
         body: JSON.stringify({ description: "TreatCode sync", public: false, files }),
       });
-  return { gistId: gist.id, updatedAt: gist.updated_at, bytes: byteLength(content) };
+  return { gistId: gist.id, ...stateOf(gist), bytes: byteLength(content) };
 }
 
 const byteLength = (text: string) => new TextEncoder().encode(text).length;

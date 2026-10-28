@@ -15,12 +15,14 @@ import {
 import { queueLabel } from "./lib/queues";
 import { indexedDbStorage } from "./storage/indexedDb";
 import {
+  changedSince,
   findGist,
   loadSync,
   pullGist,
   pushGist,
-  remoteUpdatedAt,
+  remoteState,
   storeSync,
+  SYNC_KEY,
   SyncError,
   type SyncConfig,
 } from "./storage/gistSync";
@@ -42,8 +44,8 @@ const when = (iso: string) => new Date(iso).toLocaleString();
 async function newerCloudCopy() {
   const sync = loadSync();
   if (!sync?.gistId) return null;
-  const remote = await remoteUpdatedAt(sync.token, sync.gistId).catch(() => null);
-  return remote && remote !== sync.remoteUpdatedAt ? remote : null;
+  const remote = await remoteState(sync.token, sync.gistId).catch(() => null);
+  return remote && changedSince(sync, remote) ? remote.updatedAt : null;
 }
 type Dialog =
   | { kind: "entry"; id: string }
@@ -75,6 +77,15 @@ export default function App() {
               t ?? { text: `Newer progress from another device (saved ${when(remote)}).`, offerLoad: true },
           );
       });
+  }, []);
+  // Another tab saved, loaded or disconnected: pick up its sync state so this tab's next Save
+  // doesn't mistake that tab's save for another device's.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === SYNC_KEY) setSync(loadSync());
+    };
+    addEventListener("storage", onStorage);
+    return () => removeEventListener("storage", onStorage);
   }, []);
   // Re-render every minute so entries slide into "Due now" without a refresh.
   useEffect(() => {
@@ -163,7 +174,7 @@ export default function App() {
     } catch (e) {
       // The gist is gone (or out of the token's reach): forget it so the next Save creates a new one.
       if (sync && e instanceof SyncError && e.status === 404)
-        updateSync({ ...sync, gistId: undefined, remoteUpdatedAt: undefined });
+        updateSync({ ...sync, gistId: undefined, remoteUpdatedAt: undefined, remoteVersion: undefined });
       fail(e);
     } finally {
       setSyncing(false);
@@ -185,23 +196,27 @@ export default function App() {
             token,
             gistId: found.id,
             remoteUpdatedAt: pulled.updatedAt,
+            remoteVersion: pulled.version,
             bytes: pulled.bytes,
             dirty: false,
           });
         } else {
-          // No remoteUpdatedAt yet, so the first Save warns before overwriting the cloud copy.
+          // No remote revision known yet, so the first Save warns before overwriting the cloud copy.
           updateSync({ token, gistId: found.id, dirty: true });
           setToast({ text: "Connected. Your local data was kept." });
         }
       }),
     save: () =>
       runSync(async () => {
-        const s = sync!;
+        // Read it fresh in case another tab synced since this one last rendered.
+        const s = { ...sync!, ...loadSync() };
         if (s.gistId) {
-          const remote = await remoteUpdatedAt(s.token, s.gistId);
+          const remote = await remoteState(s.token, s.gistId);
           if (
-            remote !== s.remoteUpdatedAt &&
-            !confirm(`The cloud copy was saved from another device (${when(remote)}). Overwrite it?`)
+            changedSince(s, remote) &&
+            !confirm(
+              `The cloud copy changed since this browser last synced (saved ${when(remote.updatedAt)}). Overwrite it?`,
+            )
           )
             return;
         }
@@ -210,6 +225,7 @@ export default function App() {
           ...s,
           gistId: pushed.gistId,
           remoteUpdatedAt: pushed.updatedAt,
+          remoteVersion: pushed.version,
           bytes: pushed.bytes,
           dirty: false,
         });
@@ -224,7 +240,13 @@ export default function App() {
         const pulled = await pullGist(s.token, s.gistId);
         // commit() marks the data dirty, so mark it clean afterwards.
         commit(pulled.data, "Loaded from cloud");
-        updateSync({ ...s, remoteUpdatedAt: pulled.updatedAt, bytes: pulled.bytes, dirty: false });
+        updateSync({
+          ...s,
+          remoteUpdatedAt: pulled.updatedAt,
+          remoteVersion: pulled.version,
+          bytes: pulled.bytes,
+          dirty: false,
+        });
       }),
     disconnect: () => updateSync(null),
   };

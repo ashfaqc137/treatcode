@@ -1,25 +1,31 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { findGist, pullGist, pushGist, remoteUpdatedAt, SyncError } from "./gistSync";
+import { changedSince, findGist, pullGist, pushGist, remoteState, SyncError } from "./gistSync";
 import { emptyAppData } from "../types";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-// Replies in order and records each call as [url, method, body].
+// Replies in order and records each call as [url, method, body, cache].
 function mockFetch(...replies: Response[]) {
-  const calls: [string, string, unknown][] = [];
+  const calls: [string, string, unknown, RequestCache | undefined][] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init: RequestInit = {}) => {
-      calls.push([url, init.method ?? "GET", init.body ? JSON.parse(init.body as string) : undefined]);
+      calls.push([
+        url,
+        init.method ?? "GET",
+        init.body ? JSON.parse(init.body as string) : undefined,
+        init.cache,
+      ]);
       return replies.shift()!;
     }),
   );
   return calls;
 }
-const gist = (id: string, files: Record<string, object>, updated_at = "2026-10-01T00:00:00Z") => ({
-  id,
-  updated_at,
-  files,
-});
+const gist = (
+  id: string,
+  files: Record<string, object>,
+  updated_at = "2026-10-01T00:00:00Z",
+  version = "v1",
+) => ({ id, updated_at, files, history: [{ version }, { version: "older" }] });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("gist sync", () => {
@@ -44,6 +50,7 @@ describe("gist sync", () => {
     const pulled = await pullGist("t", "tc");
     expect(pulled.data).toEqual(data);
     expect(pulled.updatedAt).toBe("2026-10-02T00:00:00Z");
+    expect(pulled.version).toBe("v1");
     expect(pulled.bytes).toBe(JSON.stringify(data).length);
   });
   it("downloads a truncated file from raw_url", async () => {
@@ -61,10 +68,11 @@ describe("gist sync", () => {
   });
   it("creates a private gist the first time and updates it after", async () => {
     const data = emptyAppData();
-    const calls = mockFetch(json(gist("new", {}, "2026-10-03T00:00:00Z")), json(gist("new", {})));
+    const calls = mockFetch(json(gist("new", {}, "2026-10-03T00:00:00Z", "v3")), json(gist("new", {})));
     expect(await pushGist("t", undefined, data)).toMatchObject({
       gistId: "new",
       updatedAt: "2026-10-03T00:00:00Z",
+      version: "v3",
     });
     await pushGist("t", "new", data);
     expect(calls[0]).toEqual([
@@ -75,17 +83,37 @@ describe("gist sync", () => {
         public: false,
         files: { "treatcode.json": { content: JSON.stringify(data) } },
       },
+      "no-store",
     ]);
     expect(calls[1].slice(0, 2)).toEqual(["https://api.github.com/gists/new", "PATCH"]);
   });
   it("maps HTTP failures to readable errors", async () => {
     mockFetch(json({}, 401), json({}, 404), json({}, 500));
-    await expect(remoteUpdatedAt("t", "tc")).rejects.toMatchObject({
+    await expect(remoteState("t", "tc")).rejects.toMatchObject({
       status: 401,
       message: /rejected the token/,
     });
-    await expect(remoteUpdatedAt("t", "tc")).rejects.toMatchObject({ status: 404 });
-    await expect(remoteUpdatedAt("t", "tc")).rejects.toBeInstanceOf(SyncError);
+    await expect(remoteState("t", "tc")).rejects.toMatchObject({ status: 404 });
+    await expect(remoteState("t", "tc")).rejects.toBeInstanceOf(SyncError);
+  });
+  it("reads the remote revision without the HTTP cache", async () => {
+    const calls = mockFetch(json(gist("tc", {}, "2026-10-04T00:00:00Z", "v4")));
+    expect(await remoteState("t", "tc")).toEqual({ updatedAt: "2026-10-04T00:00:00Z", version: "v4" });
+    expect(calls[0][3]).toBe("no-store");
+  });
+  it("tells a newer cloud revision from the one this device knows", () => {
+    const config = { token: "t", gistId: "tc", remoteUpdatedAt: "A", remoteVersion: "v1", dirty: false };
+    // updated_at can drift between responses; the commit SHA can't.
+    expect(changedSince(config, { updatedAt: "B", version: "v1" })).toBe(false);
+    expect(changedSince(config, { updatedAt: "A", version: "v2" })).toBe(true);
+    // Saved before remoteVersion existed: fall back to updated_at.
+    const old = { ...config, remoteVersion: undefined };
+    expect(changedSince(old, { updatedAt: "A", version: "v1" })).toBe(false);
+    expect(changedSince(old, { updatedAt: "B", version: "v1" })).toBe(true);
+    // Connected without loading: nothing known yet, so any cloud copy counts as changed.
+    expect(changedSince({ token: "t", gistId: "tc", dirty: true }, { updatedAt: "A", version: "v1" })).toBe(
+      true,
+    );
   });
   it("reports network failures", async () => {
     vi.stubGlobal("fetch", () => Promise.reject(new TypeError("Failed to fetch")));
