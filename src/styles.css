@@ -1,20 +1,22 @@
 :root {
   /* Each token is light-dark(light, dark); color-scheme decides which one applies. */
-  --bg: light-dark(#f4f2fb, #14121f);
-  --surface: light-dark(#ffffff, #1f1c2e);
-  --column: light-dark(#ebe8f5, #191726);
-  --text: light-dark(#1d1b2f, #ecebf5);
-  --muted: light-dark(#6d6a85, #9b98b3);
-  --border: light-dark(#dcd8ea, #322e47);
-  --primary: light-dark(#6c4cf5, #8b72ff);
+  /* Light is warm paper: cream page, sand columns, white cards, a slightly warmer violet. */
+  --bg: light-dark(#faf7f2, #14121f);
+  --surface: light-dark(#fffefb, #1f1c2e);
+  --column: light-dark(#f2ece3, #191726);
+  --text: light-dark(#2b2433, #ecebf5);
+  --muted: light-dark(#7b7286, #9b98b3);
+  --border: light-dark(#e9e1d5, #322e47);
+  --primary: light-dark(#7046e0, #8b72ff);
   --primary-text: #ffffff;
   --danger: #e5484d;
   --local: var(--primary);
   --cloud: light-dark(#0a6fb3, #5cb8f2);
   --differs: light-dark(#a35f00, #f0b45a);
-  --shadow-color: light-dark(rgb(30 20 80 / 8%), rgb(0 0 0 / 40%));
-  --shadow-soft: light-dark(rgb(30 20 80 / 6%), transparent);
-  --shadow: 0 1px 2px var(--shadow-color), 0 4px 14px var(--shadow-soft);
+  --shadow-color: light-dark(rgb(90 60 30 / 7%), rgb(0 0 0 / 40%));
+  --shadow-soft: light-dark(rgb(90 60 30 / 7%), transparent);
+  --shadow: 0 1px 2px var(--shadow-color), 0 6px 18px var(--shadow-soft);
+  --backdrop: light-dark(rgb(60 40 25 / 28%), rgb(10 8 25 / 45%));
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -319,9 +321,11 @@ button:focus-visible,
 }
 .column {
   --accent: var(--primary);
-  background: var(--column);
-  border-radius: 16px;
+  /* In light, each column takes a faint wash of its queue's colour. */
+  background: light-dark(color-mix(in oklab, var(--accent) 7%, var(--surface)), var(--column));
+  border: 1px solid light-dark(color-mix(in oklab, var(--accent) 14%, var(--border)), transparent);
   border-top: 4px solid var(--accent);
+  border-radius: 16px;
   padding: 10px;
   min-height: 200px;
   transition:
@@ -357,11 +361,17 @@ button:focus-visible,
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .column.over {
-  background: color-mix(in srgb, var(--accent) 16%, var(--column));
+  background: light-dark(
+    color-mix(in oklab, var(--accent) 16%, var(--surface)),
+    color-mix(in srgb, var(--accent) 16%, var(--column))
+  );
   box-shadow: inset 0 0 0 2px var(--accent) !important;
 }
 .due-lane {
-  background: color-mix(in srgb, var(--accent) 9%, var(--column));
+  background: light-dark(
+    color-mix(in oklab, var(--accent) 10%, var(--surface)),
+    color-mix(in srgb, var(--accent) 9%, var(--column))
+  );
 }
 .cards {
   display: grid;
@@ -505,7 +515,7 @@ button:focus-visible,
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(10 8 25 / 45%);
+  background: var(--backdrop);
   display: grid;
   place-items: center;
   padding: 16px;
