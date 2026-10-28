@@ -9,6 +9,9 @@
   --primary: light-dark(#6c4cf5, #8b72ff);
   --primary-text: #ffffff;
   --danger: #e5484d;
+  --local: var(--primary);
+  --cloud: light-dark(#0a6fb3, #5cb8f2);
+  --differs: light-dark(#a35f00, #f0b45a);
   --shadow-color: light-dark(rgb(30 20 80 / 8%), rgb(0 0 0 / 40%));
   --shadow-soft: light-dark(rgb(30 20 80 / 6%), transparent);
   --shadow: 0 1px 2px var(--shadow-color), 0 4px 14px var(--shadow-soft);
@@ -563,6 +566,86 @@ button:focus-visible,
 }
 .modal-actions span {
   flex: 1;
+}
+
+/* Sync with diff */
+.modal.wide {
+  width: min(760px, 100%);
+}
+.diff-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+.legend {
+  font-size: 0.8rem;
+}
+.diff-body {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.88rem;
+}
+.changes,
+.changes ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.changes > li + li {
+  margin-top: 10px;
+}
+.changes ul {
+  margin: 4px 0 0 18px;
+  display: grid;
+  gap: 3px;
+}
+.local {
+  --mark: var(--local);
+}
+.cloud {
+  --mark: var(--cloud);
+}
+.differs {
+  --mark: var(--differs);
+}
+.badge {
+  display: inline-block;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--mark);
+  background: color-mix(in srgb, var(--mark) 14%, transparent);
+}
+.legend > span {
+  color: var(--mark);
+  font-weight: 600;
+}
+.json-diff {
+  margin: 0;
+  font:
+    0.78rem/1.45 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  white-space: pre;
+  width: max-content;
+  min-width: 100%;
+}
+.json-diff .local,
+.json-diff .cloud {
+  background: color-mix(in srgb, var(--mark) 16%, transparent);
+}
+.json-diff .skip {
+  color: var(--muted);
+  font-style: italic;
 }
 
 /* Settings */

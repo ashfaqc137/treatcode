@@ -6,7 +6,17 @@ import type { SyncConfig } from "./storage/gistSync";
 import type { ThemePref } from "./theme";
 import { TIME_UNITS, type Entry, type Interval, type Queue, type TimeUnit, type Topic } from "./types";
 
-export function Modal({ title, close, children }: { title: string; close: () => void; children: ReactNode }) {
+export function Modal({
+  title,
+  close,
+  wide,
+  children,
+}: {
+  title: string;
+  close: () => void;
+  wide?: boolean;
+  children: ReactNode;
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     window.addEventListener("keydown", onKey);
@@ -14,7 +24,7 @@ export function Modal({ title, close, children }: { title: string; close: () => 
   }, [close]);
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
-      <div className="modal" role="dialog" aria-label={title}>
+      <div className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-label={title}>
         <h2>{title}</h2>
         {children}
       </div>
@@ -302,6 +312,7 @@ export interface CloudSync {
   connect: (token: string) => void;
   save: () => void;
   load: () => void;
+  compare: () => void;
   disconnect: () => void;
 }
 const formatBytes = (n: number) =>
@@ -328,6 +339,9 @@ function CloudPanel({ cloud }: { cloud: CloudSync }) {
             </button>
             <button disabled={busy || !config.gistId} onClick={cloud.load}>
               Load from cloud
+            </button>
+            <button disabled={busy || !config.gistId} onClick={cloud.compare}>
+              Sync with diff
             </button>
             <button disabled={busy} onClick={cloud.disconnect}>
               Disconnect

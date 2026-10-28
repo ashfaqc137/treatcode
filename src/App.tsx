@@ -24,11 +24,13 @@ import {
   storeSync,
   SYNC_KEY,
   SyncError,
+  type RemoteState,
   type SyncConfig,
 } from "./storage/gistSync";
 import type { AppData, Entry, Queue } from "./types";
 import { BoardView, type BoardActions } from "./Board";
 import { EntryEditor, QueueEditor, SettingsView, TopicEditor, type CloudSync } from "./views";
+import { SyncDiff } from "./SyncDiff";
 import { useTheme } from "./theme";
 
 interface Toast {
@@ -47,6 +49,7 @@ async function newerCloudCopy() {
   const remote = await remoteState(sync.token, sync.gistId).catch(() => null);
   return remote && changedSince(sync, remote) ? remote.updatedAt : null;
 }
+type Pulled = Awaited<ReturnType<typeof pullGist>>;
 type Dialog =
   | { kind: "entry"; id: string }
   | { kind: "queue"; queue: Queue | null }
@@ -58,7 +61,9 @@ export default function App() {
     [dialog, setDialog] = useState<Dialog | null>(null),
     [now, setNow] = useState(() => new Date()),
     [sync, setSync] = useState(loadSync),
-    [syncing, setSyncing] = useState(false);
+    [syncing, setSyncing] = useState(false),
+    // The cloud copy shown in the Sync with diff modal.
+    [comparing, setComparing] = useState<Pulled | null>(null);
   const [theme, setTheme, shownTheme] = useTheme();
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -173,12 +178,34 @@ export default function App() {
       await fn();
     } catch (e) {
       // The gist is gone (or out of the token's reach): forget it so the next Save creates a new one.
-      if (sync && e instanceof SyncError && e.status === 404)
+      if (sync && e instanceof SyncError && e.status === 404) {
         updateSync({ ...sync, gistId: undefined, remoteUpdatedAt: undefined, remoteVersion: undefined });
+        setComparing(null);
+      }
       fail(e);
     } finally {
       setSyncing(false);
     }
+  };
+  // Read it fresh in case another tab synced since this one last rendered.
+  const currentSync = () => ({ ...sync!, ...loadSync() });
+  const synced = (s: SyncConfig, remote: RemoteState & { bytes: number }) =>
+    updateSync({
+      ...s,
+      remoteUpdatedAt: remote.updatedAt,
+      remoteVersion: remote.version,
+      bytes: remote.bytes,
+      dirty: false,
+    });
+  const applyPulled = (s: SyncConfig, pulled: Pulled) => {
+    // commit() marks the data dirty, so mark it clean afterwards.
+    commit(pulled.data, "Loaded from cloud");
+    synced(s, pulled);
+  };
+  const pushNow = async (s: SyncConfig) => {
+    const pushed = await pushGist(s.token, s.gistId, data);
+    synced({ ...s, gistId: pushed.gistId }, pushed);
+    setToast({ text: "Saved to cloud" });
   };
   const cloud: CloudSync = {
     config: sync,
@@ -190,16 +217,7 @@ export default function App() {
           updateSync({ token, dirty: true });
           setToast({ text: "Connected. Press Save to create your cloud copy." });
         } else if (confirm(`Cloud copy found (saved ${when(found.updatedAt)}). Load it now?`)) {
-          const pulled = await pullGist(token, found.id);
-          commit(pulled.data, "Loaded from cloud");
-          updateSync({
-            token,
-            gistId: found.id,
-            remoteUpdatedAt: pulled.updatedAt,
-            remoteVersion: pulled.version,
-            bytes: pulled.bytes,
-            dirty: false,
-          });
+          applyPulled({ token, gistId: found.id, dirty: false }, await pullGist(token, found.id));
         } else {
           // No remote revision known yet, so the first Save warns before overwriting the cloud copy.
           updateSync({ token, gistId: found.id, dirty: true });
@@ -208,8 +226,7 @@ export default function App() {
       }),
     save: () =>
       runSync(async () => {
-        // Read it fresh in case another tab synced since this one last rendered.
-        const s = { ...sync!, ...loadSync() };
+        const s = currentSync();
         if (s.gistId) {
           const remote = await remoteState(s.token, s.gistId);
           if (
@@ -220,16 +237,7 @@ export default function App() {
           )
             return;
         }
-        const pushed = await pushGist(s.token, s.gistId, data);
-        updateSync({
-          ...s,
-          gistId: pushed.gistId,
-          remoteUpdatedAt: pushed.updatedAt,
-          remoteVersion: pushed.version,
-          bytes: pushed.bytes,
-          dirty: false,
-        });
-        setToast({ text: "Saved to cloud" });
+        await pushNow(s);
       }),
     load: () =>
       runSync(async () => {
@@ -237,19 +245,33 @@ export default function App() {
         if (!s.gistId) throw new Error("Nothing saved to the cloud yet.");
         if (s.dirty && !confirm("You have changes not saved to the cloud. Replace them with the cloud copy?"))
           return;
+        applyPulled(s, await pullGist(s.token, s.gistId));
+      }),
+    compare: () =>
+      runSync(async () => {
+        const s = currentSync();
+        if (!s.gistId) throw new Error("Nothing saved to the cloud yet.");
         const pulled = await pullGist(s.token, s.gistId);
-        // commit() marks the data dirty, so mark it clean afterwards.
-        commit(pulled.data, "Loaded from cloud");
-        updateSync({
-          ...s,
-          remoteUpdatedAt: pulled.updatedAt,
-          remoteVersion: pulled.version,
-          bytes: pulled.bytes,
-          dirty: false,
-        });
+        if (JSON.stringify(pulled.data) === JSON.stringify(data)) {
+          synced(s, pulled);
+          setToast({ text: "Already in sync" });
+        } else setComparing(pulled);
       }),
     disconnect: () => updateSync(null),
   };
+  const keepLocal = (pulled: Pulled) =>
+    runSync(async () => {
+      const s = currentSync();
+      // Someone saved while the diff was open: show them what changed rather than overwrite it unseen.
+      const remote = await remoteState(s.token, s.gistId!);
+      if (changedSince({ ...s, remoteUpdatedAt: pulled.updatedAt, remoteVersion: pulled.version }, remote)) {
+        setComparing(await pullGist(s.token, s.gistId!));
+        setToast({ text: "The cloud copy changed while you were comparing, so the diff was refreshed." });
+        return;
+      }
+      await pushNow(s);
+      setComparing(null);
+    });
 
   const entry = dialog?.kind === "entry" ? data.entries.find((e) => e.id === dialog.id) : undefined;
   return (
@@ -390,6 +412,21 @@ export default function App() {
               close();
             })
           }
+        />
+      )}
+      {comparing && sync && (
+        <SyncDiff
+          local={data}
+          cloud={comparing.data}
+          cloudSavedAt={comparing.updatedAt}
+          config={sync}
+          busy={syncing}
+          keepLocal={() => keepLocal(comparing)}
+          keepCloud={() => {
+            applyPulled(currentSync(), comparing);
+            setComparing(null);
+          }}
+          close={() => setComparing(null)}
         />
       )}
       {toast && (
