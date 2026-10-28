@@ -156,6 +156,7 @@ button:focus-visible,
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-right: auto;
 }
 .brand h1 {
   font-size: 1.2rem;
@@ -171,12 +172,15 @@ button:focus-visible,
   color: #fff;
   font-weight: 700;
 }
+/* Topics wrap onto new rows and scroll vertically once they outgrow 200px. */
 .topics {
-  flex: 1;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
   padding: 2px;
+  margin-bottom: 14px;
 }
 .topics button {
   border-radius: 999px;
@@ -280,20 +284,38 @@ button:focus-visible,
   color: #fff;
 }
 
-/* Board */
-.board {
+/* Board: the app fills the viewport and only the board scrolls, so the
+   top bar, topics, quick add and status row stay in view. */
+.app:has(> .board-page) {
+  height: 100dvh;
   display: flex;
-  gap: 12px;
-  overflow-x: auto;
+  flex-direction: column;
   padding-bottom: 12px;
-  align-items: flex-start;
-  scroll-snap-type: x proximity;
+}
+.app:has(> .board-page) > *,
+.board-page > * {
+  flex-shrink: 0;
+}
+.board-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Queues wrap into rows of equal-width columns. */
+.board {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  align-items: start;
+  /* Room for the last row to scroll clear of the toast. */
+  padding: 2px 2px 60px;
 }
 .column {
   --accent: var(--primary);
-  flex: 1 0 190px;
-  max-width: 320px;
-  scroll-snap-align: start;
   background: var(--column);
   border-radius: 16px;
   border-top: 4px solid var(--accent);
@@ -336,8 +358,6 @@ button:focus-visible,
   box-shadow: inset 0 0 0 2px var(--accent) !important;
 }
 .due-lane {
-  flex: 1.3 0 240px;
-  max-width: 380px;
   background: color-mix(in srgb, var(--accent) 9%, var(--column));
 }
 .cards {
@@ -358,7 +378,6 @@ button:focus-visible,
   font-size: 1.6rem;
 }
 .add-column {
-  flex: 0 0 110px;
   min-height: 80px;
   border: 2px dashed var(--border);
   border-top: 2px dashed var(--border);
@@ -626,7 +645,13 @@ button:focus-visible,
   .quick-row .hint {
     display: none;
   }
-  .column {
-    flex-basis: 82vw;
+  /* Phones scroll the whole page rather than squeezing the board. */
+  .app:has(> .board-page) {
+    height: auto;
+    display: block;
+    padding-bottom: 80px;
+  }
+  .board {
+    overflow: visible;
   }
 }

@@ -259,26 +259,6 @@ export default function App() {
           <span className="logo">↻</span>
           <h1>TreatCode</h1>
         </div>
-        <nav className="topics" aria-label="Topics">
-          {data.topics.map((t) => (
-            <button
-              key={t.id}
-              className={t.id === topic.id ? "on" : ""}
-              title={t.id === topic.id ? "Rename or delete" : undefined}
-              onClick={() => {
-                setView("board");
-                if (t.id === topic.id) setDialog({ kind: "topic", editing: true });
-                else save({ ...data, selectedTopicId: t.id });
-              }}
-            >
-              {t.title}
-              {t.id === topic.id && <span className="pencil">✎</span>}
-            </button>
-          ))}
-          <button className="add-topic" onClick={() => setDialog({ kind: "topic", editing: false })}>
-            + Topic
-          </button>
-        </nav>
         <button
           className="icon theme-toggle"
           title={`Switch to ${shownTheme === "dark" ? "light" : "dark"} theme`}
@@ -306,6 +286,26 @@ export default function App() {
           ⚙
         </button>
       </header>
+      <nav className="topics" aria-label="Topics">
+        {data.topics.map((t) => (
+          <button
+            key={t.id}
+            className={t.id === topic.id ? "on" : ""}
+            title={t.id === topic.id ? "Rename or delete" : undefined}
+            onClick={() => {
+              setView("board");
+              if (t.id === topic.id) setDialog({ kind: "topic", editing: true });
+              else save({ ...data, selectedTopicId: t.id });
+            }}
+          >
+            {t.title}
+            {t.id === topic.id && <span className="pencil">✎</span>}
+          </button>
+        ))}
+        <button className="add-topic" onClick={() => setDialog({ kind: "topic", editing: false })}>
+          + Topic
+        </button>
+      </nav>
       {view === "board" ? (
         <BoardView data={data} topic={topic} now={now} actions={actions} />
       ) : (
