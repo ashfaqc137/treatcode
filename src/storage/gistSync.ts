@@ -1,3 +1,4 @@
+import { checksum } from "../lib/checksum";
 import { validate } from "../lib/data";
 import type { AppData } from "../types";
 
@@ -25,8 +26,9 @@ export interface SyncConfig {
   // server means someone saved since. Exact, unlike updated_at, which can drift between responses.
   remoteVersion?: string;
   bytes?: number;
-  // Local changes not yet saved to the cloud.
-  dirty: boolean;
+  // checksum() of the content as of this device's last save or load. Local data with a different
+  // checksum has changes the cloud doesn't; none yet means nothing has been synced.
+  syncedChecksum?: string;
 }
 // Per-device (it holds the token), so it lives in localStorage rather than the exported AppData.
 export const SYNC_KEY = "treatcode-sync";
@@ -120,12 +122,35 @@ export async function remoteState(token: string, gistId: string) {
   return stateOf(await request<Gist>(token, `/gists/${gistId}`));
 }
 
+// The config once this device has saved or loaded `data` as the given cloud revision.
+export const syncedTo = (
+  config: SyncConfig,
+  remote: RemoteState & { bytes: number },
+  data: AppData,
+): SyncConfig => ({
+  ...config,
+  remoteUpdatedAt: remote.updatedAt,
+  remoteVersion: remote.version,
+  bytes: remote.bytes,
+  syncedChecksum: checksum(data),
+});
+
 // Whether the gist moved past the revision this device last saved or loaded. Configs stored before
 // remoteVersion existed fall back to updated_at.
 export function changedSince(config: SyncConfig, remote: RemoteState) {
   return config.remoteVersion && remote.version
     ? config.remoteVersion !== remote.version
     : config.remoteUpdatedAt !== remote.updatedAt;
+}
+
+// What a Sync should do, from the content checksums now and what this device last synced. Only the
+// side that moved since then wins outright; both moving is a conflict for the user to settle.
+export type SyncStep = "in-sync" | "push" | "pull" | "conflict";
+export function syncStep(config: SyncConfig, remote: RemoteState, local: string, cloud: string): SyncStep {
+  if (local === cloud) return "in-sync";
+  if (!changedSince(config, remote)) return "push";
+  if (local === config.syncedChecksum) return "pull";
+  return "conflict";
 }
 
 // See NOTE (size limit): raw_url covers files over 1 MB, but only up to 10 MB.

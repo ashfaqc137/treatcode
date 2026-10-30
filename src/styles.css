@@ -10,8 +10,9 @@
   --primary: light-dark(#7046e0, #8b72ff);
   --primary-text: #ffffff;
   --danger: #e5484d;
-  --local: var(--primary);
-  --cloud: light-dark(#0a6fb3, #5cb8f2);
+  /* Diff sides: green vs magenta stay apart for most colour-blind viewers too. */
+  --local: light-dark(#18803a, #4fd67a);
+  --cloud: light-dark(#c0267a, #ff70b8);
   --differs: light-dark(#a35f00, #f0b45a);
   --shadow-color: light-dark(rgb(90 60 30 / 7%), rgb(0 0 0 / 40%));
   --shadow-soft: light-dark(rgb(90 60 30 / 7%), transparent);
@@ -178,6 +179,10 @@ button:focus-visible,
   font-weight: 700;
 }
 /* Topics wrap onto new rows and scroll vertically once they outgrow 200px. */
+.back-nav {
+  display: block;
+  margin: -8px 0 10px;
+}
 .topics {
   display: flex;
   flex-wrap: wrap;
@@ -209,17 +214,17 @@ button:focus-visible,
 .topbar > .icon.on {
   color: var(--primary);
 }
-.topbar > .cloud {
+.topbar > .sync {
   position: relative;
 }
-.cloud .dot {
+.sync .dot {
   position: absolute;
   top: 4px;
   right: 3px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--primary);
+  background: var(--mark);
 }
 
 /* Quick add */
@@ -632,7 +637,7 @@ button:focus-visible,
   font-weight: 600;
   white-space: nowrap;
   color: var(--mark);
-  background: color-mix(in srgb, var(--mark) 14%, transparent);
+  background: color-mix(in srgb, var(--mark) 18%, transparent);
 }
 .legend > span {
   color: var(--mark);
@@ -651,7 +656,8 @@ button:focus-visible,
 }
 .json-diff .local,
 .json-diff .cloud {
-  background: color-mix(in srgb, var(--mark) 16%, transparent);
+  background: color-mix(in srgb, var(--mark) 20%, transparent);
+  box-shadow: inset 3px 0 var(--mark);
 }
 .json-diff .skip {
   color: var(--muted);
@@ -663,9 +669,6 @@ button:focus-visible,
   max-width: 640px;
   display: grid;
   gap: 16px;
-}
-.settings > .link {
-  justify-self: start;
 }
 .panel .actions {
   display: flex;

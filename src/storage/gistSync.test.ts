@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { changedSince, findGist, pullGist, pushGist, remoteState, SyncError } from "./gistSync";
+import { changedSince, findGist, pullGist, pushGist, remoteState, SyncError, syncStep } from "./gistSync";
 import { emptyAppData } from "../types";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -102,7 +102,7 @@ describe("gist sync", () => {
     expect(calls[0][3]).toBe("no-store");
   });
   it("tells a newer cloud revision from the one this device knows", () => {
-    const config = { token: "t", gistId: "tc", remoteUpdatedAt: "A", remoteVersion: "v1", dirty: false };
+    const config = { token: "t", gistId: "tc", remoteUpdatedAt: "A", remoteVersion: "v1" };
     // updated_at can drift between responses; the commit SHA can't.
     expect(changedSince(config, { updatedAt: "B", version: "v1" })).toBe(false);
     expect(changedSince(config, { updatedAt: "A", version: "v2" })).toBe(true);
@@ -111,9 +111,18 @@ describe("gist sync", () => {
     expect(changedSince(old, { updatedAt: "A", version: "v1" })).toBe(false);
     expect(changedSince(old, { updatedAt: "B", version: "v1" })).toBe(true);
     // Connected without loading: nothing known yet, so any cloud copy counts as changed.
-    expect(changedSince({ token: "t", gistId: "tc", dirty: true }, { updatedAt: "A", version: "v1" })).toBe(
-      true,
-    );
+    expect(changedSince({ token: "t", gistId: "tc" }, { updatedAt: "A", version: "v1" })).toBe(true);
+  });
+  it("picks the sync step from which side moved since the last sync", () => {
+    const config = { token: "t", gistId: "tc", remoteVersion: "v1", syncedChecksum: "base" };
+    const same = { updatedAt: "A", version: "v1" };
+    const moved = { updatedAt: "B", version: "v2" };
+    expect(syncStep(config, moved, "x", "x")).toBe("in-sync");
+    expect(syncStep(config, same, "edited", "base")).toBe("push");
+    expect(syncStep(config, moved, "base", "theirs")).toBe("pull");
+    expect(syncStep(config, moved, "edited", "theirs")).toBe("conflict");
+    // Connected to an existing gist without loading it: nothing to go on, so the user decides.
+    expect(syncStep({ token: "t", gistId: "tc" }, same, "mine", "theirs")).toBe("conflict");
   });
   it("reports network failures", async () => {
     vi.stubGlobal("fetch", () => Promise.reject(new TypeError("Failed to fetch")));

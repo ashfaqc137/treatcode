@@ -19,6 +19,7 @@ export function SyncDiff({
   cloud,
   cloudSavedAt,
   config,
+  dirty,
   busy,
   keepLocal,
   keepCloud,
@@ -28,6 +29,7 @@ export function SyncDiff({
   cloud: AppData;
   cloudSavedAt: string;
   config: SyncConfig;
+  dirty: boolean;
   busy: boolean;
   keepLocal: () => void;
   keepCloud: () => void;
@@ -41,11 +43,11 @@ export function SyncDiff({
     [tab, local, cloud],
   );
   return (
-    <Modal title="Sync with diff" close={close} wide>
+    <Modal title="Sync" close={close} wide>
       <p className="muted">
         Cloud copy saved {when(cloudSavedAt)}. This browser last synced{" "}
         {config.remoteUpdatedAt ? when(config.remoteUpdatedAt) : "never"}
-        {config.dirty && " and has unsaved changes"}.
+        {dirty && " and has unsaved changes"}.
       </p>
       <div className="diff-tabs">
         <div className="chips" role="tablist" aria-label="Diff view">

@@ -308,11 +308,11 @@ const THEMES: { value: ThemePref; label: string }[] = [
 ];
 export interface CloudSync {
   config: SyncConfig | null;
+  dirty: boolean;
+  cloudAhead: boolean;
   busy: boolean;
   connect: (token: string) => void;
-  save: () => void;
-  load: () => void;
-  compare: () => void;
+  sync: () => void;
   disconnect: () => void;
 }
 const formatBytes = (n: number) =>
@@ -331,17 +331,12 @@ function CloudPanel({ cloud }: { cloud: CloudSync }) {
               : "Not saved to the cloud yet"}
             {/* Shown so a growing save gets noticed: see NOTE (size limit) in storage/gistSync.ts. */}
             {config.bytes !== undefined && ` · ${formatBytes(config.bytes)}`}
-            {config.dirty && " · unsaved changes"}
+            {cloud.dirty && " · unsaved changes"}
+            {cloud.cloudAhead && " · newer copy in the cloud"}
           </p>
           <div className="actions">
-            <button className="primary" disabled={busy} onClick={cloud.save}>
-              Save to cloud
-            </button>
-            <button disabled={busy || !config.gistId} onClick={cloud.load}>
-              Load from cloud
-            </button>
-            <button disabled={busy || !config.gistId} onClick={cloud.compare}>
-              Sync with diff
+            <button className="primary" disabled={busy} onClick={cloud.sync}>
+              Sync
             </button>
             <button disabled={busy} onClick={cloud.disconnect}>
               Disconnect
@@ -398,7 +393,6 @@ export function SettingsView({
   fileRef,
   cloud,
   clear,
-  back,
 }: {
   theme: ThemePref;
   setTheme: (theme: ThemePref) => void;
@@ -407,13 +401,9 @@ export function SettingsView({
   fileRef: RefObject<HTMLInputElement | null>;
   cloud: CloudSync;
   clear: () => void;
-  back: () => void;
 }) {
   return (
     <section className="settings">
-      <button className="link" onClick={back}>
-        ← Back to board
-      </button>
       <h2>Settings</h2>
       <article className="panel">
         <h3>Appearance</h3>
