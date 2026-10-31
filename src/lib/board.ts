@@ -26,6 +26,11 @@ export function buildBoard(topic: Topic, entries: Entry[], now: Date): Board {
     })),
   };
 }
+// Whether any entry in the topic sits in its "Due now" lane, for the dot on the topic's tab.
+export function hasDue(topic: Topic, entries: Entry[], now: Date) {
+  const queues = new Map(topic.queues.map((q) => [q.id, q]));
+  return entries.some((e) => e.topicId === topic.id && isDue(e, queues.get(e.queueId), now));
+}
 export function nextUp(board: Board, topic: Topic) {
   const queued = board.columns.flatMap((c) => c.entries.map((e) => ({ e, due: dueAt(e, c.queue) })));
   const next = queued.filter((x) => x.due).sort((a, b) => time(a.due) - time(b.due))[0];

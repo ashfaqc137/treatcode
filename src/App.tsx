@@ -12,6 +12,7 @@ import {
   updateQueue,
   validate,
 } from "./lib/data";
+import { hasDue } from "./lib/board";
 import { checksum } from "./lib/checksum";
 import { queueLabel } from "./lib/queues";
 import { indexedDbStorage } from "./storage/indexedDb";
@@ -375,6 +376,7 @@ export default function App() {
             }}
           >
             {t.title}
+            {hasDue(t, data.entries, now) && <span className="due-dot" aria-label="has due entries" />}
             {t.id === topic.id && <span className="pencil">✎</span>}
           </button>
         ))}
