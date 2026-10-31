@@ -9,7 +9,7 @@ import {
   updateEntry,
   validate,
 } from "./data";
-import { allTags, buildBoard, nextUp } from "./board";
+import { allTags, buildBoard, hasDue, nextUp } from "./board";
 import { dueAt, formatDue } from "./scheduling";
 import { emptyAppData, type AppData } from "../types";
 
@@ -121,6 +121,15 @@ describe("board", () => {
     expect(formatDue(entry, queue, later(4))).toBe("in 10d+");
     if (due > later(14)) expect(formatDue(entry, queue, later(14))).toBe("any day now");
     expect(formatDue(entry, queue, due)).toBe("due now");
+  });
+  it("flags topics that have entries due", () => {
+    const { data, done } = seeded();
+    expect(hasDue(topic(data), data.entries, later(0, 6))).toBe(false);
+    expect(hasDue(topic(data), data.entries, later(1))).toBe(true);
+    const parked = data.entries.map((e) => ({ ...e, queueId: done }));
+    expect(hasDue(topic(data), parked, later(100))).toBe(false);
+    const other = createTopic(data, "Other");
+    expect(hasDue(topic(other), other.entries, later(100))).toBe(false);
   });
   it("collects tags", () => expect(allTags(seeded().data.entries)).toEqual(["arrays", "heap"]));
 });

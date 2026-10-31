@@ -207,6 +207,15 @@ button:focus-visible,
   opacity: 0.6;
   font-size: 0.85em;
 }
+.due-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+  vertical-align: middle;
+}
 .topics .add-topic {
   border-style: dashed;
   color: var(--muted);
